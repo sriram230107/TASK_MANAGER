@@ -1,0 +1,170 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TEAM_LEAD
+  EMPLOYEE
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  BLOCKED
+  ON_HOLD
+  PENDING_REVIEW
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  users     User[]
+  teams     Team[]
+  tasks     Task[]
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           Role
+  managerId      String?
+  manager        User?        @relation("UserManager", fields: [managerId], references: [id])
+  directReports  User[]       @relation("UserManager")
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  memberships    TeamMember[]
+  ledTeams       Team[]       @relation("TeamLead")
+
+  // Phase 2 additions
+  createdTasks   Task[]       @relation("TaskCreator")
+  assignedTasks  Task[]       @relation("TaskAssignee")
+  taskUpdates    TaskUpdate[]
+  taskAttachments TaskAttachment[]
+}
+
+model Team {
+  id             String       @id @default(uuid())
+  name           String
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  teamLeadId     String
+  teamLead       User         @relation("TeamLead", fields: [teamLeadId], references: [id])
+
+  members        TeamMember[]
+  tasks          Task[]
+}
+
+model TeamMember {
+  id       String   @id @default(uuid())
+  
+  teamId   String
+  team     Team     @relation(fields: [teamId], references: [id])
+  
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  
+  joinedAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+}
+
+model Task {
+  id              String       @id @default(uuid())
+  title           String
+  description     String?
+  
+  createdById     String
+  createdBy       User         @relation("TaskCreator", fields: [createdById], references: [id])
+  
+  assignedToId    String
+  assignedTo      User         @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  
+  teamId          String
+  team            Team         @relation(fields: [teamId], references: [id])
+  
+  parentTaskId    String?
+  parentTask      Task?        @relation("SubTasks", fields: [parentTaskId], references: [id])
+  subTasks        Task[]       @relation("SubTasks")
+  
+  status          TaskStatus   @default(NOT_STARTED)
+  priority        TaskPriority @default(MEDIUM)
+  
+  progressPercent Int          @default(0)
+  estimatedHours  Float?
+  actualHours     Float?       @default(0)
+  
+  startDate       DateTime?
+  dueDate         DateTime?
+  completedAt     DateTime?
+  
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+
+  updates         TaskUpdate[]
+  attachments     TaskAttachment[]
+}
+
+model TaskUpdate {
+  id              String     @id @default(uuid())
+  
+  taskId          String
+  task            Task       @relation(fields: [taskId], references: [id])
+  
+  userId          String
+  user            User       @relation(fields: [userId], references: [id])
+  
+  progressPercent Int
+  comment         String?
+  hoursLogged     Float?
+  
+  createdAt       DateTime   @default(now())
+}
+
+model TaskAttachment {
+  id           String   @id @default(uuid())
+  
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id])
+  
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  
+  fileUrl      String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  
+  createdAt    DateTime @default(now())
+}
