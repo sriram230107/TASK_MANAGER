@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+export const recurrenceRuleSchema = z.object({
+    frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM']),
+    interval: z.number().min(1).optional(),
+    endDate: z.string().datetime().optional()
+});
+
 export const createTaskSchema = z.object({
     title: z.string().min(1, 'Title is required'),
     description: z.string().optional(),
@@ -9,7 +15,8 @@ export const createTaskSchema = z.object({
     priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
     estimatedHours: z.number().optional(),
     startDate: z.string().datetime().optional(),
-    dueDate: z.string().datetime().optional()
+    dueDate: z.string().datetime().optional(),
+    recurrenceRule: recurrenceRuleSchema.optional()
 });
 
 export const updateTaskStatusSchema = z.object({

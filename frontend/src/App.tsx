@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
-import { DashboardStub } from './pages/DashboardStub';
+import { DashboardRouter } from './pages/DashboardRouter';
 import './index.css';
 
 function App() {
@@ -14,7 +14,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/" element={
             <ProtectedRoute>
-              <DashboardStub />
+              <DashboardRouter />
             </ProtectedRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />

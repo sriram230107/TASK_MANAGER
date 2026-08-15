@@ -31,6 +31,13 @@ enum TaskPriority {
   URGENT
 }
 
+enum RecurrenceFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
 model Organization {
   id        String   @id @default(uuid())
   name      String
@@ -61,11 +68,15 @@ model User {
   memberships    TeamMember[]
   ledTeams       Team[]       @relation("TeamLead")
 
-  // Phase 2 additions
   createdTasks   Task[]       @relation("TaskCreator")
   assignedTasks  Task[]       @relation("TaskAssignee")
   taskUpdates    TaskUpdate[]
   taskAttachments TaskAttachment[]
+  
+  notifications  Notification[]
+  activityLogs   ActivityLog[]
+  reviewsGiven   PerformanceReview[] @relation("Reviewer")
+  reviewsReceived PerformanceReview[] @relation("Reviewee")
 }
 
 model Team {
@@ -128,12 +139,15 @@ model Task {
   organizationId  String
   organization    Organization @relation(fields: [organizationId], references: [id])
   
+  recurrenceRule  RecurrenceRule?
+
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   deletedAt       DateTime?
 
   updates         TaskUpdate[]
   attachments     TaskAttachment[]
+  notifications   Notification[]
 }
 
 model TaskUpdate {
@@ -167,4 +181,57 @@ model TaskAttachment {
   sizeBytes    Int
   
   createdAt    DateTime @default(now())
+}
+
+model RecurrenceRule {
+  id        String              @id @default(uuid())
+  
+  taskId    String              @unique
+  task      Task                @relation(fields: [taskId], references: [id])
+  
+  frequency RecurrenceFrequency
+  interval  Int                 @default(1)
+  endDate   DateTime?
+  
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id])
+  type      String   
+  isRead    Boolean  @default(false)
+  sentAt    DateTime @default(now())
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String   
+  entity    String   
+  entityId  String
+  createdAt DateTime @default(now())
+}
+
+model PerformanceReview {
+  id                 String   @id @default(uuid())
+  employeeId         String
+  employee           User     @relation("Reviewee", fields: [employeeId], references: [id])
+  reviewerId         String
+  reviewer           User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  
+  taskCompletionRate Float
+  onTimeRate         Float
+  rating             Int      
+  comments           String?
+  
+  periodStart        DateTime
+  periodEnd          DateTime
+  
+  createdAt          DateTime @default(now())
 }
