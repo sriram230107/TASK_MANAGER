@@ -4,6 +4,7 @@ import { User, TaskStatus } from '@prisma/client';
 
 export const getEmployeeDashboard = async (user: User) => {
     const tasks = await prisma.task.findMany({
+        take: 500,
         where: { assignedToId: user.id, deletedAt: null },
         include: {
             parentTask: { select: { id: true, title: true } },
@@ -50,6 +51,7 @@ export const getTeamLeadDashboard = async (user: User) => {
 
     // Get all tasks for those employees
     const allTasks = await prisma.task.findMany({
+        take: 500,
         where: { assignedToId: { in: employeeIds }, deletedAt: null },
         include: { updates: { orderBy: { createdAt: 'desc' } } }
     });

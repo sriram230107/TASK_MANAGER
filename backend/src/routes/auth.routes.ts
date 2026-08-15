@@ -1,15 +1,20 @@
 import { Router } from 'express';
 import * as authController from '../controllers/auth.controller';
-import { authenticate } from '../middleware/auth.middleware';
-import { authorize } from '../middleware/rbac.middleware';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
 
-router.post('/login', authController.login);
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: { message: 'Too many requests from this IP, please try again after 15 minutes' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+router.post('/login', authLimiter, authController.login);
+router.post('/register', authLimiter, authController.register);
 router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);
-
-// Admin only route
-router.post('/register', authenticate, authorize('user', 'create'), authController.register);
 
 export default router;

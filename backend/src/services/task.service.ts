@@ -67,6 +67,40 @@ export const createTask = async (user: User, data: any) => {
     return task;
 };
 
+export const updateTask = async (user: User, taskId: string, data: any) => {
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) throw new Error('Task not found');
+
+    const oldAssigneeId = task.assignedToId;
+
+    const updatedTask = await prisma.task.update({
+        where: { id: taskId },
+        data
+    });
+
+    if (data.assignedToId && oldAssigneeId !== data.assignedToId) {
+        await prisma.activityLog.create({
+            data: {
+                userId: user.id,
+                action: `ASSIGNMENT_CHANGE_FROM_${oldAssigneeId}_TO_${data.assignedToId}_BY_${user.id}`,
+                entity: 'Task',
+                entityId: taskId
+            }
+        });
+    }
+
+    await prisma.activityLog.create({
+        data: {
+            userId: user.id,
+            action: 'UPDATE_TASK',
+            entity: 'Task',
+            entityId: taskId
+        }
+    });
+
+    return updatedTask;
+};
+
 export const updateTaskStatus = async (user: User, taskId: string, data: any) => {
     const task = await prisma.task.findUnique({ where: { id: taskId }, include: { subTasks: true } });
     if (!task) throw new Error('Task not found');
@@ -77,7 +111,7 @@ export const updateTaskStatus = async (user: User, taskId: string, data: any) =>
 
     if (data.status === 'COMPLETED') {
         if (user.id !== task.createdById) {
-            throw new Error('Only task creator or manager can approve completion');
+            throw new Error('Employees must submit tasks for PENDING_REVIEW approval instead of direct COMPLETED closure.');
         }
 
         if (task.subTasks.some((st: any) => st.status !== 'COMPLETED')) {

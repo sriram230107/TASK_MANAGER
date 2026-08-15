@@ -1,7 +1,13 @@
 import { prisma } from '../utils/prisma';
 import { User } from '@prisma/client';
+import { isAuthorizedForTarget } from '../utils/hierarchy';
 
 export const submitReview = async (reviewer: User, employeeId: string, data: any) => {
+
+    const isAuthorized = await isAuthorizedForTarget(reviewer, employeeId);
+    if (!isAuthorized) {
+        throw new Error('Forbidden: You are not authorized to evaluate this employee.');
+    }
 
     const periodStart = new Date(data.periodStart);
     const periodEnd = new Date(data.periodEnd);

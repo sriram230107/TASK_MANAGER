@@ -41,3 +41,12 @@ export const assignRole = async (req: Request, res: Response): Promise<void> => 
         res.status(400).json({ message: error.message });
     }
 };
+
+export const getDashboard = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const dashboard = await adminService.getGlobalDashboard((req as any).user);
+        res.json(dashboard);
+    } catch (error: any) {
+        res.status(400).json({ message: error.message });
+    }
+};

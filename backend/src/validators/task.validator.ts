@@ -38,3 +38,13 @@ export const getTasksQuerySchema = z.object({
     status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'BLOCKED', 'ON_HOLD', 'PENDING_REVIEW', 'COMPLETED', 'CANCELLED']).optional(),
     assignedTo: z.string().uuid().optional()
 });
+
+export const updateTaskSchema = z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    assignedToId: z.string().uuid().optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+    estimatedHours: z.number().optional(),
+    startDate: z.string().datetime().optional(),
+    dueDate: z.string().datetime().optional()
+});

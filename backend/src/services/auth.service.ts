@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
 import { z } from 'zod';
 import { loginSchema, registerSchema } from '../validators/auth.validator';
@@ -11,10 +12,17 @@ export const loginUser = async (data: z.infer<typeof loginSchema>) => {
     const isValid = await bcrypt.compare(data.password, user.passwordHash);
     if (!isValid) throw new Error('Invalid credentials');
 
-    const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_ACCESS_SECRET || 'access_secret', { expiresIn: '15m' });
-    const refreshToken = jwt.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET || 'refresh_secret', { expiresIn: '7d' });
+    const accessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_ACCESS_SECRET as string, { expiresIn: '15m' });
 
-    return { user, accessToken, refreshToken };
+    const rawToken = crypto.randomBytes(40).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await prisma.refreshToken.create({
+        data: { userId: user.id, tokenHash, expiresAt }
+    });
+
+    return { user, accessToken, refreshToken: rawToken };
 };
 
 export const registerUser = async (data: z.infer<typeof registerSchema>) => {

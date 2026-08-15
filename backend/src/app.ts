@@ -6,6 +6,8 @@ import adminRoutes from './routes/admin.routes';
 import taskRoutes from './routes/task.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import performanceRoutes from './routes/performance.routes';
+import reportRoutes from './routes/report.routes';
+import templateRoutes from './routes/template.routes';
 
 const app = express();
 
@@ -19,5 +21,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/tasks', taskRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/performance', performanceRoutes);
+app.use('/api/v1/reports', reportRoutes);
+app.use('/api/v1/templates', templateRoutes);
 
 export default app;
