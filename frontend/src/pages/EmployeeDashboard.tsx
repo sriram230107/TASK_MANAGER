@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { TaskCard } from '../components/TaskCard';
-import { Calendar } from '../components/Calendar';
 
 export const EmployeeDashboard: React.FC = () => {
     const [data, setData] = useState<any>(null);
