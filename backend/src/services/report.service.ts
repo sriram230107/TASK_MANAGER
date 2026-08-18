@@ -1,16 +1,58 @@
-// @ts-nocheck
 import { prisma } from '../utils/prisma';
 import { User } from '@prisma/client';
 
 export const getAggregatedReport = async (user: User, filters: any) => {
-    let whereMap: any = { deletedAt: null };
+    // Base filter: always scoped to requesting user's organization
+    const whereMap: any = { deletedAt: null, organizationId: user.organizationId };
 
-    if (filters.targetType === 'EMPLOYEE') {
-        whereMap.assignedToId = filters.targetId;
-    } else if (filters.targetType === 'TEAM') {
-        whereMap.teamId = filters.targetId;
-    } else if (filters.targetType === 'MANAGER') {
-        whereMap.team = { teamLead: { managerId: filters.targetId } };
+    // Role-based scope: limit what targetType/targetId combinations are allowed
+    if (user.role === 'EMPLOYEE') {
+        // Employees can only see their own assigned tasks
+        whereMap.assignedToId = user.id;
+    } else if (user.role === 'TEAM_LEAD') {
+        // Team Lead can only query their own teams
+        if (filters.targetType === 'EMPLOYEE') {
+            // Verify the targetId employee is in one of this TL's teams
+            const membership = await prisma.teamMember.findFirst({
+                where: { userId: filters.targetId, team: { teamLeadId: user.id, organizationId: user.organizationId } }
+            });
+            if (!membership) throw new Error('Forbidden: Target employee is not in your team');
+            whereMap.assignedToId = filters.targetId;
+        } else if (filters.targetType === 'TEAM') {
+            const team = await prisma.team.findFirst({ where: { id: filters.targetId, teamLeadId: user.id, organizationId: user.organizationId } });
+            if (!team) throw new Error('Forbidden: That team is not yours');
+            whereMap.teamId = filters.targetId;
+        } else {
+            // Default: show all tasks in TL's teams
+            whereMap.team = { teamLeadId: user.id, organizationId: user.organizationId };
+        }
+    } else if (user.role === 'MANAGER') {
+        if (filters.targetType === 'EMPLOYEE') {
+            // Verify employee belongs to a team under this manager
+            const membership = await prisma.teamMember.findFirst({
+                where: { userId: filters.targetId, team: { teamLead: { managerId: user.id }, organizationId: user.organizationId } }
+            });
+            if (!membership) throw new Error('Forbidden: Target employee is not under your management');
+            whereMap.assignedToId = filters.targetId;
+        } else if (filters.targetType === 'TEAM') {
+            const team = await prisma.team.findFirst({ where: { id: filters.targetId, teamLead: { managerId: user.id }, organizationId: user.organizationId } });
+            if (!team) throw new Error('Forbidden: That team is not under your management');
+            whereMap.teamId = filters.targetId;
+        } else {
+            // Default: all tasks in manager's teams
+            whereMap.team = { teamLead: { managerId: user.id }, organizationId: user.organizationId };
+        }
+    } else if (user.role === 'ADMIN') {
+        // Admin can query by any filter within their org
+        if (filters.targetType === 'EMPLOYEE') {
+            whereMap.assignedToId = filters.targetId;
+        } else if (filters.targetType === 'TEAM') {
+            whereMap.teamId = filters.targetId;
+        } else if (filters.targetType === 'MANAGER') {
+            whereMap.team = { teamLead: { managerId: filters.targetId } };
+        }
+    } else {
+        throw new Error('Forbidden: You are not authorized to access reports');
     }
 
     const tasks = await prisma.task.findMany({
