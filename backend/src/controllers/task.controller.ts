@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { createTaskSchema, updateTaskStatusSchema, taskUpdateSchema, getTasksQuerySchema } from '../validators/task.validator';
 import * as taskService from '../services/task.service';
+import { prisma } from '../utils/prisma';
 
 export const create = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -48,7 +49,6 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
         const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
 
-        const { prisma } = require('../utils/prisma');
         const attachment = await prisma.taskAttachment.create({
             data: {
                 taskId: req.params.id,
