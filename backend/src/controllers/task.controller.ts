@@ -51,7 +51,7 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
         const attachment = await prisma.taskAttachment.create({
             data: {
-                taskId: req.params.id,
+                taskId: req.params.id as string,
                 uploadedById: (req as any).user.id,
                 fileUrl,
                 fileName: req.file.originalname,
