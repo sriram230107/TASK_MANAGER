@@ -1,9 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider = "postgresql"
 }
 
-generator client {
-  provider = "prisma-client-js"
+model Organization {
+  id            String         @id @default(uuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  tasks         Task[]
+  taskTemplates TaskTemplate[]
+  teams         Team[]
+  users         User[]
+}
+
+model User {
+  id              String              @id @default(uuid())
+  email           String              @unique
+  passwordHash    String
+  name            String
+  role            Role
+  managerId       String?
+  organizationId  String
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  deletedAt       DateTime?
+  activityLogs    ActivityLog[]
+  notifications   Notification[]
+  reviewsReceived PerformanceReview[] @relation("Reviewee")
+  reviewsGiven    PerformanceReview[] @relation("Reviewer")
+  refreshTokens   RefreshToken[]
+  assignedTasks   Task[]              @relation("TaskAssignee")
+  createdTasks    Task[]              @relation("TaskCreator")
+  taskAttachments TaskAttachment[]
+  taskUpdates     TaskUpdate[]
+  ledTeams        Team[]              @relation("TeamLead")
+  memberships     TeamMember[]
+  manager         User?               @relation("UserManager", fields: [managerId], references: [id])
+  directReports   User[]              @relation("UserManager")
+  organization    Organization        @relation(fields: [organizationId], references: [id])
+}
+
+model Team {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  teamLeadId     String
+  tasks          Task[]
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  teamLead       User         @relation("TeamLead", fields: [teamLeadId], references: [id])
+  members        TeamMember[]
+}
+
+model TeamMember {
+  id       String   @id @default(uuid())
+  teamId   String
+  userId   String
+  joinedAt DateTime @default(now())
+  team     Team     @relation(fields: [teamId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([teamId, userId])
+}
+
+model Task {
+  id              String           @id @default(uuid())
+  title           String
+  description     String?
+  createdById     String
+  assignedToId    String
+  teamId          String
+  parentTaskId    String?
+  status          TaskStatus       @default(NOT_STARTED)
+  priority        TaskPriority     @default(MEDIUM)
+  progressPercent Int              @default(0)
+  estimatedHours  Float?
+  actualHours     Float?           @default(0)
+  startDate       DateTime?
+  dueDate         DateTime?
+  completedAt     DateTime?
+  organizationId  String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  notifications   Notification[]
+  recurrenceRule  RecurrenceRule?
+  assignedTo      User             @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdBy       User             @relation("TaskCreator", fields: [createdById], references: [id])
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  parentTask      Task?            @relation("SubTasks", fields: [parentTaskId], references: [id])
+  subTasks        Task[]           @relation("SubTasks")
+  team            Team             @relation(fields: [teamId], references: [id])
+  attachments     TaskAttachment[]
+  updates         TaskUpdate[]
+}
+
+model TaskUpdate {
+  id              String   @id @default(uuid())
+  taskId          String
+  userId          String
+  progressPercent Int
+  comment         String?
+  hoursLogged     Float?
+  createdAt       DateTime @default(now())
+  task            Task     @relation(fields: [taskId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+}
+
+model TaskAttachment {
+  id           String   @id @default(uuid())
+  taskId       String
+  uploadedById String
+  fileUrl      String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime @default(now())
+  task         Task     @relation(fields: [taskId], references: [id])
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+}
+
+model RecurrenceRule {
+  id        String              @id @default(uuid())
+  taskId    String              @unique
+  frequency RecurrenceFrequency
+  interval  Int                 @default(1)
+  endDate   DateTime?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  task      Task                @relation(fields: [taskId], references: [id])
+}
+
+model Notification {
+  id     String   @id @default(uuid())
+  userId String
+  taskId String?
+  type   String
+  isRead Boolean  @default(false)
+  sentAt DateTime @default(now())
+  task   Task?    @relation(fields: [taskId], references: [id])
+  user   User     @relation(fields: [userId], references: [id])
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PerformanceReview {
+  id                 String   @id @default(uuid())
+  employeeId         String
+  reviewerId         String
+  taskCompletionRate Float
+  onTimeRate         Float
+  rating             Int
+  comments           String?
+  periodStart        DateTime
+  periodEnd          DateTime
+  createdAt          DateTime @default(now())
+  employee           User     @relation("Reviewee", fields: [employeeId], references: [id])
+  reviewer           User     @relation("Reviewer", fields: [reviewerId], references: [id])
+}
+
+model TaskTemplate {
+  id                   String       @id @default(uuid())
+  titlePattern         String
+  description          String?
+  defaultPriority      TaskPriority @default(MEDIUM)
+  defaultDurationHours Float?
+  checklist            String[]
+  organizationId       String
+  createdAt            DateTime     @default(now())
+  organization         Organization @relation(fields: [organizationId], references: [id])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userId    String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
 }
 
 enum Role {
@@ -35,230 +220,4 @@ enum RecurrenceFrequency {
   WEEKLY
   MONTHLY
   CUSTOM
-}
-
-model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-
-  users     User[]
-  teams     Team[]
-  tasks     Task[]
-  taskTemplates TaskTemplate[]
-}
-
-model User {
-  id             String       @id @default(uuid())
-  email          String       @unique
-  passwordHash   String
-  name           String
-  role           Role
-  managerId      String?
-  manager        User?        @relation("UserManager", fields: [managerId], references: [id])
-  directReports  User[]       @relation("UserManager")
-  
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  deletedAt      DateTime?
-
-  memberships    TeamMember[]
-  ledTeams       Team[]       @relation("TeamLead")
-
-  createdTasks   Task[]       @relation("TaskCreator")
-  assignedTasks  Task[]       @relation("TaskAssignee")
-  taskUpdates    TaskUpdate[]
-  taskAttachments TaskAttachment[]
-  refreshTokens   RefreshToken[]
-  
-  notifications  Notification[]
-  activityLogs   ActivityLog[]
-  reviewsGiven   PerformanceReview[] @relation("Reviewer")
-  reviewsReceived PerformanceReview[] @relation("Reviewee")
-}
-
-model Team {
-  id             String       @id @default(uuid())
-  name           String
-  
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  
-  teamLeadId     String
-  teamLead       User         @relation("TeamLead", fields: [teamLeadId], references: [id])
-
-  members        TeamMember[]
-  tasks          Task[]
-}
-
-model TeamMember {
-  id       String   @id @default(uuid())
-  
-  teamId   String
-  team     Team     @relation(fields: [teamId], references: [id])
-  
-  userId   String
-  user     User     @relation(fields: [userId], references: [id])
-  
-  joinedAt DateTime @default(now())
-
-  @@unique([teamId, userId])
-}
-
-model Task {
-  id              String       @id @default(uuid())
-  title           String
-  description     String?
-  
-  createdById     String
-  createdBy       User         @relation("TaskCreator", fields: [createdById], references: [id])
-  
-  assignedToId    String
-  assignedTo      User         @relation("TaskAssignee", fields: [assignedToId], references: [id])
-  
-  teamId          String
-  team            Team         @relation(fields: [teamId], references: [id])
-  
-  parentTaskId    String?
-  parentTask      Task?        @relation("SubTasks", fields: [parentTaskId], references: [id])
-  subTasks        Task[]       @relation("SubTasks")
-  
-  status          TaskStatus   @default(NOT_STARTED)
-  priority        TaskPriority @default(MEDIUM)
-  
-  progressPercent Int          @default(0)
-  estimatedHours  Float?
-  actualHours     Float?       @default(0)
-  
-  startDate       DateTime?
-  dueDate         DateTime?
-  completedAt     DateTime?
-  
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id])
-  
-  recurrenceRule  RecurrenceRule?
-
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  deletedAt       DateTime?
-
-  updates         TaskUpdate[]
-  attachments     TaskAttachment[]
-  notifications   Notification[]
-}
-
-model TaskUpdate {
-  id              String     @id @default(uuid())
-  
-  taskId          String
-  task            Task       @relation(fields: [taskId], references: [id])
-  
-  userId          String
-  user            User       @relation(fields: [userId], references: [id])
-  
-  progressPercent Int
-  comment         String?
-  hoursLogged     Float?
-  
-  createdAt       DateTime   @default(now())
-}
-
-model TaskAttachment {
-  id           String   @id @default(uuid())
-  
-  taskId       String
-  task         Task     @relation(fields: [taskId], references: [id])
-  
-  uploadedById String
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
-  
-  fileUrl      String
-  fileName     String
-  mimeType     String
-  sizeBytes    Int
-  
-  createdAt    DateTime @default(now())
-}
-
-model RecurrenceRule {
-  id        String              @id @default(uuid())
-  
-  taskId    String              @unique
-  task      Task                @relation(fields: [taskId], references: [id])
-  
-  frequency RecurrenceFrequency
-  interval  Int                 @default(1)
-  endDate   DateTime?
-  
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-}
-
-model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  taskId    String?
-  task      Task?    @relation(fields: [taskId], references: [id])
-  type      String   
-  isRead    Boolean  @default(false)
-  sentAt    DateTime @default(now())
-}
-
-model ActivityLog {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  action    String   
-  entity    String   
-  entityId  String
-  createdAt DateTime @default(now())
-}
-
-model PerformanceReview {
-  id                 String   @id @default(uuid())
-  employeeId         String
-  employee           User     @relation("Reviewee", fields: [employeeId], references: [id])
-  reviewerId         String
-  reviewer           User     @relation("Reviewer", fields: [reviewerId], references: [id])
-  
-  taskCompletionRate Float
-  onTimeRate         Float
-  rating             Int      
-  comments           String?
-  
-  periodStart        DateTime
-  periodEnd          DateTime
-  
-  createdAt          DateTime @default(now())
-}
-
-model TaskTemplate {
-  id                   String       @id @default(uuid())
-  titlePattern         String
-  description          String?
-  defaultPriority      TaskPriority @default(MEDIUM)
-  defaultDurationHours Float?
-  checklist            String[]
-  
-  organizationId       String
-  organization         Organization @relation(fields: [organizationId], references: [id])
-  
-  createdAt            DateTime     @default(now())
-}
-
-model RefreshToken {
-  id        String   @id @default(uuid())
-  tokenHash String   @unique 
-  expiresAt DateTime
-  revokedAt DateTime?
-  
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  
-  createdAt DateTime @default(now())
 }

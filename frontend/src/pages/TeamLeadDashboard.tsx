@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api/axios';
 import { PaginatedTable } from '../components/PaginatedTable';
 import { StatusBadge } from '../components/StatusBadge';
 
@@ -10,7 +10,7 @@ export const TeamLeadDashboard: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await axios.get('http://localhost:3000/api/v1/dashboard/team-lead', { withCredentials: true });
+                const res = await api.get('/dashboard/team-lead');
                 setData(res.data);
             } catch (e) {
                 console.error(e);
