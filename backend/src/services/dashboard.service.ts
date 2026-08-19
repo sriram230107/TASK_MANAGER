@@ -39,17 +39,26 @@ export const getEmployeeDashboard = async (user: User) => {
     });
 
     const profile = await prisma.user.findUnique({
-        where: {
-            id: user.id
-        },
-        include: {
-            manager: {
-                select: {
-                    name: true
-                }
+    where: {
+        id: user.id
+    },
+    select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        managerId: true,
+        organizationId: true,
+        createdAt: true,
+        updatedAt: true,
+        deletedAt: true,
+        manager: {
+            select: {
+                name: true
             }
         }
-    });
+    }
+});
 
     const now = new Date();
 

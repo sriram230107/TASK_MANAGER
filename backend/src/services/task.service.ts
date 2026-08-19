@@ -506,16 +506,23 @@ export const logTaskProgress = async (
         throw new Error('Only assignee can log progress');
     }
 
-    await prisma.task.update({
+    const isCompleted = data.progressPercent === 100;
+
+    const updatedTask = await prisma.task.update({
         where: { id: taskId },
         data: {
             progressPercent: data.progressPercent,
+
             actualHours:
                 data.hoursLogged !== undefined
                     ? {
                           increment: data.hoursLogged
                       }
-                    : undefined
+                    : undefined,
+
+            status: isCompleted ? 'COMPLETED' : 'IN_PROGRESS',
+
+            completedAt: isCompleted ? new Date() : null
         }
     });
 
