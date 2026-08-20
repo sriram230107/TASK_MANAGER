@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api/axios';
 import { PaginatedTable } from '../components/PaginatedTable';
 
 export const ManagerDashboard: React.FC = () => {
@@ -9,7 +9,7 @@ export const ManagerDashboard: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await axios.get('http://localhost:3000/api/v1/dashboard/manager', { withCredentials: true });
+                const res = await api.get('/dashboard/manager')
                 setData(res.data);
             } catch (e) {
                 console.error(e);
