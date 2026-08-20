@@ -45,14 +45,72 @@ export const listTasks = async (req: Request, res: Response): Promise<void> => {
 
 export const uploadAttachment = async (req: Request, res: Response): Promise<void> => {
     try {
-        if (!req.file) throw new Error('No file uploaded');
+        if (!req.file) {
+            throw new Error('No file uploaded');
+        }
 
-        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        const user = (req as any).user;
+
+        const task = await prisma.task.findUnique({
+            where: {
+                id: req.params.id as string
+            }
+        });
+
+        if (!task) {
+            res.status(404).json({ message: 'Task not found' });
+            return;
+        }
+
+        if (task.organizationId !== user.organizationId) {
+            res.status(403).json({ message: 'Forbidden' });
+            return;
+        }
+
+        let allowed = false;
+
+        if (user.role === 'ADMIN') {
+            allowed = true;
+        } else if (user.role === 'EMPLOYEE') {
+            allowed = task.assignedToId === user.id;
+        } else if (user.role === 'TEAM_LEAD') {
+            const team = await prisma.team.findFirst({
+                where: {
+                    id: task.teamId,
+                    organizationId: user.organizationId,
+                    teamLeadId: user.id
+                }
+            });
+
+            allowed = !!team;
+        } else if (user.role === 'MANAGER') {
+            const team = await prisma.team.findFirst({
+                where: {
+                    id: task.teamId,
+                    organizationId: user.organizationId,
+                    teamLead: {
+                        managerId: user.id
+                    }
+                }
+            });
+
+            allowed = !!team;
+        }
+
+        if (!allowed) {
+            res.status(403).json({
+                message: 'Forbidden: You cannot attach files to this task'
+            });
+            return;
+        }
+
+        const fileUrl =
+            `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
 
         const attachment = await prisma.taskAttachment.create({
             data: {
-                taskId: req.params.id as string,
-                uploadedById: (req as any).user.id,
+                taskId: task.id,
+                uploadedById: user.id,
                 fileUrl,
                 fileName: req.file.originalname,
                 mimeType: req.file.mimetype,
@@ -62,6 +120,8 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
         res.status(201).json(attachment);
     } catch (error: any) {
-        res.status(400).json({ message: error.message });
+        res.status(400).json({
+            message: error.message
+        });
     }
 };
