@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import { PaginatedTable } from '../components/PaginatedTable';
 import { TaskCard } from '../components/TaskCard';
+import { TaskManagementPanel } from '../components/TaskManagementPanel';
 
 export const TeamLeadDashboard: React.FC = () => {
     const [data, setData] = useState<any>(null);
@@ -47,6 +48,11 @@ export const TeamLeadDashboard: React.FC = () => {
 
     return (
         <main className="dashboard-container">
+
+            <TaskManagementPanel
+                userRole="TEAM_LEAD"
+                onCreated={fetchData}
+            />
 
             <div
                 className="grid grid-cols-4"
@@ -151,3 +157,5 @@ export const TeamLeadDashboard: React.FC = () => {
         </main>
     );
 };
+
+

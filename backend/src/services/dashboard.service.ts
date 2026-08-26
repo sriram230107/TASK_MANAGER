@@ -1,78 +1,22 @@
 // @ts-nocheck
+
 import { prisma } from '../utils/prisma';
 import { User } from '@prisma/client';
 
-export const getEmployeeDashboard = async (user: User) => {
-    const tasks = await prisma.task.findMany({
-        take: 500,
-        where: {
-            organizationId: user.organizationId,
-            assignedToId: user.id,
-            deletedAt: null
-        },
-        include: {
-            parentTask: {
-                select: {
-                    id: true,
-                    title: true
-                }
-            },
-            updates: {
-                orderBy: {
-                    createdAt: 'desc'
-                }
-            },
-            team: {
-                select: {
-                    name: true,
-                    teamLead: {
-                        select: {
-                            name: true
-                        }
-                    }
-                }
-            }
-        },
-        orderBy: {
-            dueDate: 'asc'
-        }
-    });
-
-    const profile = await prisma.user.findUnique({
-    where: {
-        id: user.id
-    },
-    select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        managerId: true,
-        organizationId: true,
-        createdAt: true,
-        updatedAt: true,
-        deletedAt: true,
-        manager: {
-            select: {
-                name: true
-            }
-        }
-    }
-});
-
+const getTaskStats = (tasks: any[]) => {
     const now = new Date();
 
-    const stats = tasks.reduce(
-        (acc, t) => {
-            if (t.status === 'COMPLETED') {
+    return tasks.reduce(
+        (acc, task) => {
+            if (task.status === 'COMPLETED') {
                 acc.completed++;
             } else if (
-                t.dueDate &&
-                t.dueDate < now &&
-                t.status !== 'CANCELLED'
+                task.dueDate &&
+                task.dueDate < now &&
+                task.status !== 'CANCELLED'
             ) {
                 acc.overdue++;
-            } else if (t.status === 'BLOCKED') {
+            } else if (task.status === 'BLOCKED') {
                 acc.blocked++;
             } else {
                 acc.active++;
@@ -87,6 +31,95 @@ export const getEmployeeDashboard = async (user: User) => {
             blocked: 0
         }
     );
+};
+
+
+/* =========================================================
+   EMPLOYEE DASHBOARD
+   ========================================================= */
+
+export const getEmployeeDashboard = async (
+    user: User
+) => {
+    const tasks = await prisma.task.findMany({
+        take: 500,
+
+        where: {
+            organizationId: user.organizationId,
+            assignedToId: user.id,
+            deletedAt: null
+        },
+
+        include: {
+            parentTask: {
+                select: {
+                    id: true,
+                    title: true
+                }
+            },
+
+            updates: {
+                orderBy: {
+                    createdAt: 'desc'
+                }
+            },
+
+            team: {
+                select: {
+                    id: true,
+                    name: true,
+
+                    teamLead: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    }
+                }
+            },
+
+            assignedTo: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true
+                }
+            }
+        },
+
+        orderBy: {
+            dueDate: 'asc'
+        }
+    });
+
+    const profile =
+        await prisma.user.findUnique({
+            where: {
+                id: user.id
+            },
+
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                managerId: true,
+                organizationId: true,
+                createdAt: true,
+                updatedAt: true,
+                deletedAt: true,
+
+                manager: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+    const stats = getTaskStats(tasks);
 
     return {
         profile,
@@ -95,271 +128,578 @@ export const getEmployeeDashboard = async (user: User) => {
     };
 };
 
-export const getTeamLeadDashboard = async (user: User) => {
+
+/* =========================================================
+   TEAM LEAD DASHBOARD
+   ========================================================= */
+
+export const getTeamLeadDashboard = async (
+    user: User
+) => {
+
+    /*
+     * STEP 1
+     * Find only teams directly led by this Team Lead.
+     */
+
     const teams = await prisma.team.findMany({
         where: {
             organizationId: user.organizationId,
             teamLeadId: user.id
         },
+
         include: {
+            teamLead: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true
+                }
+            },
+
             members: {
                 include: {
                     user: {
                         select: {
                             id: true,
                             name: true,
-                            email: true
+                            email: true,
+                            role: true,
+                            managerId: true
                         }
                     }
                 }
             }
+        },
+
+        orderBy: {
+            name: 'asc'
         }
     });
 
-    const teamIds = teams.map(t => t.id);
-
-    const employeeIds = teams.flatMap(
-        team => team.members.map(member => member.userId)
+    const teamIds = teams.map(
+        team => team.id
     );
 
+    /*
+     * STEP 2
+     * Get all employees belonging to those teams.
+     */
+
+    const employeeIds = [
+        ...new Set(
+            teams.flatMap(team =>
+                team.members.map(
+                    member => member.userId
+                )
+            )
+        )
+    ];
+
+    /*
+     * STEP 3
+     * IMPORTANT:
+     * Fetch ALL tasks belonging to the Team Lead's teams.
+     *
+     * This is what ensures assigned tasks appear
+     * in the Team Lead dashboard.
+     */
+
     const allTasks = await prisma.task.findMany({
-        take: 500,
+        take: 1000,
+
         where: {
             organizationId: user.organizationId,
+
             teamId: {
                 in: teamIds
             },
+
             deletedAt: null
         },
+
         include: {
+            assignedTo: {
+                select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    role: true
+                }
+            },
+
+            createdBy: {
+                select: {
+                    id: true,
+                    name: true,
+                    role: true
+                }
+            },
+
+            team: {
+                select: {
+                    id: true,
+                    name: true
+                }
+            },
+
+            parentTask: {
+                select: {
+                    id: true,
+                    title: true
+                }
+            },
+
             updates: {
                 orderBy: {
                     createdAt: 'desc'
                 }
             }
-        }
+        },
+
+        orderBy: [
+            {
+                dueDate: 'asc'
+            },
+            {
+                createdAt: 'desc'
+            }
+        ]
     });
 
-    const now = new Date();
+    /*
+     * STEP 4
+     * Overall team statistics.
+     */
 
-    const overall = {
-        active: 0,
-        completed: 0,
-        overdue: 0,
-        blocked: 0
-    };
+    const overall =
+        getTaskStats(allTasks);
+
+    /*
+     * STEP 5
+     * Build employee-level task data.
+     *
+     * Every employee gets their assigned tasks.
+     */
 
     const employeesMap = new Map();
 
-    employeeIds.forEach(id => {
-        employeesMap.set(id, {
-            active: 0,
-            completed: 0,
-            tasks: []
-        });
-    });
+    employeeIds.forEach(
+        employeeId => {
+            employeesMap.set(
+                employeeId,
+                {
+                    active: 0,
+                    completed: 0,
+                    overdue: 0,
+                    blocked: 0,
+                    total: 0,
+                    tasks: []
+                }
+            );
+        }
+    );
 
     allTasks.forEach(task => {
-        if (task.status === 'COMPLETED') {
-            overall.completed++;
-        } else if (
-            task.dueDate &&
-            task.dueDate < now &&
-            task.status !== 'CANCELLED'
+
+        /*
+         * Only put a task into an employee's
+         * dashboard section if that employee
+         * belongs to one of the Team Lead's teams.
+         */
+
+        if (
+            !employeesMap.has(
+                task.assignedToId
+            )
         ) {
-            overall.overdue++;
-        } else if (task.status === 'BLOCKED') {
-            overall.blocked++;
-        } else {
-            overall.active++;
+            return;
         }
 
-        if (employeesMap.has(task.assignedToId)) {
-            const employeeData = employeesMap.get(
+        const employeeData =
+            employeesMap.get(
                 task.assignedToId
             );
 
-            employeeData.tasks.push(task);
+        employeeData.total++;
 
-            if (task.status === 'COMPLETED') {
-                employeeData.completed++;
-            } else {
-                employeeData.active++;
-            }
+        employeeData.tasks.push(task);
+
+        if (
+            task.status ===
+            'COMPLETED'
+        ) {
+            employeeData.completed++;
+
+        } else if (
+            task.dueDate &&
+            task.dueDate < new Date() &&
+            task.status !== 'CANCELLED'
+        ) {
+            employeeData.overdue++;
+
+        } else if (
+            task.status ===
+            'BLOCKED'
+        ) {
+            employeeData.blocked++;
+
+        } else {
+            employeeData.active++;
         }
     });
 
-    const employees = teams.flatMap(team =>
-        team.members.map(member => ({
-            ...member.user,
-            teamId: team.id,
-            teamName: team.name,
-            stats: employeesMap.get(member.userId)
-        }))
-    );
+    /*
+     * STEP 6
+     * Return employees with their assigned tasks.
+     */
 
-    const pendingReview = await prisma.task.findMany({
-        where: {
-            organizationId: user.organizationId,
-            teamId: {
-                in: teamIds
+    const employees =
+        teams.flatMap(team =>
+            team.members.map(
+                member => {
+
+                    const stats =
+                        employeesMap.get(
+                            member.userId
+                        ) || {
+                            total: 0,
+                            active: 0,
+                            completed: 0,
+                            overdue: 0,
+                            blocked: 0,
+                            tasks: []
+                        };
+
+                    return {
+                        ...member.user,
+
+                        teamId:
+                            team.id,
+
+                        teamName:
+                            team.name,
+
+                        stats
+                    };
+                }
+            )
+        );
+
+    /*
+     * STEP 7
+     * Tasks waiting for Team Lead review.
+     */
+
+    const pendingReview =
+        allTasks.filter(
+            task =>
+                task.status ===
+                'PENDING_REVIEW'
+        );
+
+    /*
+     * STEP 8
+     * Recent activity generated by
+     * employees in the Team Lead's teams.
+     */
+
+    const activityFeed =
+        await prisma.activityLog.findMany({
+            take: 20,
+
+            where: {
+                userId: {
+                    in: [
+                        ...employeeIds,
+                        user.id
+                    ]
+                }
             },
-            status: 'PENDING_REVIEW',
-            deletedAt: null
-        },
-        include: {
-            assignedTo: {
-                select: {
-                    name: true
-                }
-            }
-        }
-    });
 
-    const activityFeed = await prisma.activityLog.findMany({
-        take: 15,
-        where: {
-            userId: {
-                in: employeeIds
-            }
-        },
-        orderBy: {
-            createdAt: 'desc'
-        },
-        include: {
-            user: {
-                select: {
-                    name: true
+            orderBy: {
+                createdAt: 'desc'
+            },
+
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        role: true
+                    }
                 }
             }
-        }
-    });
+        });
 
     return {
         teams,
+
         overall,
+
         employees,
+
+        /*
+         * Also return ALL team tasks directly.
+         * This gives the frontend a reliable task list
+         * instead of forcing it to reconstruct tasks
+         * from employee objects.
+         */
+
+        tasks: allTasks,
+
         pendingReview,
+
         activityFeed
     };
 };
 
-export const getManagerDashboard = async (user: User) => {
-    const teams = await prisma.team.findMany({
-        where: {
-            organizationId: user.organizationId,
-            teamLead: {
-                managerId: user.id
-            }
-        },
-        include: {
-            teamLead: {
-                select: {
-                    name: true,
-                    id: true
+
+/* =========================================================
+   MANAGER DASHBOARD
+   ========================================================= */
+
+export const getManagerDashboard = async (
+    user: User
+) => {
+
+    /*
+     * Manager can see:
+     *
+     * Manager
+     *   └── Team Lead
+     *        └── Team
+     *             └── Employees
+     *                  └── Tasks
+     */
+
+    const teams =
+        await prisma.team.findMany({
+
+            where: {
+                organizationId:
+                    user.organizationId,
+
+                teamLead: {
+                    managerId:
+                        user.id
                 }
             },
-            members: {
-                select: {
-                    userId: true
-                }
-            },
-            tasks: {
-                where: {
-                    organizationId: user.organizationId,
-                    deletedAt: null
+
+            include: {
+
+                teamLead: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true
+                    }
                 },
-                select: {
-                    status: true,
-                    dueDate: true,
-                    assignedToId: true
+
+                members: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                                role: true,
+                                managerId: true
+                            }
+                        }
+                    }
+                },
+
+                tasks: {
+                    where: {
+                        organizationId:
+                            user.organizationId,
+
+                        deletedAt:
+                            null
+                    },
+
+                    include: {
+                        assignedTo: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                                role: true
+                            }
+                        },
+
+                        createdBy: {
+                            select: {
+                                id: true,
+                                name: true,
+                                role: true
+                            }
+                        },
+
+                        team: {
+                            select: {
+                                id: true,
+                                name: true
+                            }
+                        }
+                    },
+
+                    orderBy: {
+                        createdAt:
+                            'desc'
+                    }
                 }
-            }
-        }
-    });
+            },
 
-    const employeeIds = teams.flatMap(
-        team => team.members.map(member => member.userId)
-    );
-
-    const aggregated = {
-        totalTeams: teams.length,
-        totalTasks: 0,
-        completed: 0,
-        overdue: 0,
-        blocked: 0
-    };
-
-    const now = new Date();
-
-    const teamBreakdown = teams.map(team => {
-        const stats = {
-            total: team.tasks.length,
-            completed: 0,
-            overdue: 0,
-            blocked: 0,
-            completionRate: 0
-        };
-
-        aggregated.totalTasks += team.tasks.length;
-
-        team.tasks.forEach(task => {
-            if (task.status === 'COMPLETED') {
-                stats.completed++;
-                aggregated.completed++;
-            } else if (
-                task.dueDate &&
-                task.dueDate < now &&
-                task.status !== 'CANCELLED'
-            ) {
-                stats.overdue++;
-                aggregated.overdue++;
-            } else if (task.status === 'BLOCKED') {
-                stats.blocked++;
-                aggregated.blocked++;
+            orderBy: {
+                name: 'asc'
             }
         });
 
-        if (stats.total > 0) {
-            stats.completionRate = Math.round(
-                (stats.completed / stats.total) * 100
-            );
-        }
+    const allTasks =
+        teams.flatMap(
+            team => team.tasks
+        );
 
-        return {
-            id: team.id,
-            name: team.name,
-            teamLead: team.teamLead,
-            memberCount: team.members.length,
-            stats
-        };
-    });
+    const employeeIds = [
+        ...new Set(
+            teams.flatMap(
+                team =>
+                    team.members.map(
+                        member =>
+                            member.userId
+                    )
+            )
+        )
+    ];
 
-    const activityFeed = await prisma.activityLog.findMany({
-        take: 15,
-        where: {
-            userId: {
-                in: [
-                    user.id,
-                    ...employeeIds
-                ]
-            }
-        },
-        orderBy: {
-            createdAt: 'desc'
-        },
-        include: {
-            user: {
-                select: {
-                    name: true
+    const overall =
+        getTaskStats(allTasks);
+
+    const aggregated = {
+        totalTeams:
+            teams.length,
+
+        totalTasks:
+            allTasks.length,
+
+        completed:
+            overall.completed,
+
+        overdue:
+            overall.overdue,
+
+        blocked:
+            overall.blocked
+    };
+
+    /*
+     * Team-by-team manager view.
+     */
+
+    const teamBreakdown =
+        teams.map(team => {
+
+            const stats =
+                getTaskStats(
+                    team.tasks
+                );
+
+            const total =
+                team.tasks.length;
+
+            const completionRate =
+                total > 0
+                    ? Math.round(
+                          (stats.completed /
+                              total) *
+                              100
+                      )
+                    : 0;
+
+            return {
+                id:
+                    team.id,
+
+                name:
+                    team.name,
+
+                teamLead:
+                    team.teamLead,
+
+                memberCount:
+                    team.members.length,
+
+                stats: {
+                    total,
+
+                    active:
+                        stats.active,
+
+                    completed:
+                        stats.completed,
+
+                    overdue:
+                        stats.overdue,
+
+                    blocked:
+                        stats.blocked,
+
+                    completionRate
+                },
+
+                tasks:
+                    team.tasks
+            };
+        });
+
+    /*
+     * Manager activity feed.
+     */
+
+    const activityFeed =
+        await prisma.activityLog.findMany({
+
+            take: 20,
+
+            where: {
+                userId: {
+                    in: [
+                        user.id,
+                        ...employeeIds
+                    ]
+                }
+            },
+
+            orderBy: {
+                createdAt:
+                    'desc'
+            },
+
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        role: true
+                    }
                 }
             }
-        }
-    });
+        });
 
     return {
         aggregated,
+
         teamBreakdown,
+
+        /*
+         * Direct task list for manager.
+         */
+
+        tasks:
+            allTasks,
+
         activityFeed
     };
 };

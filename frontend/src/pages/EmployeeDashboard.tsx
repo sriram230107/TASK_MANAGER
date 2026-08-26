@@ -142,7 +142,7 @@ export const EmployeeDashboard: React.FC = () => {
 
                     <div className="grid grid-cols-2">
                         {data.tasks.map((t: any) => (
-                            <TaskCard key={t.id} task={t} />
+                            <TaskCard key={t.id} task={t} userRole="EMPLOYEE" />
                         ))}
 
                         {data.tasks.length === 0 && (

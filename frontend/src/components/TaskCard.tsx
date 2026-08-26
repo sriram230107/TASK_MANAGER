@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../api/axios';
 import { StatusBadge } from './StatusBadge';
 import { ProgressBar } from './ProgressBar';
 
@@ -24,44 +24,39 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     userRole,
     onUpdated
 }) => {
-    const [progress, setProgress] = useState(
-        task.progressPercent ?? 0
-    );
-
+    const [progress, setProgress] = useState(task.progressPercent ?? 0);
     const [comment, setComment] = useState('');
     const [hoursLogged, setHoursLogged] = useState('');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
 
-    const apiUrl = 'http://localhost:3000/api/v1';
+    const employeeCanEdit =
+        userRole === 'EMPLOYEE' &&
+        task.status !== 'PENDING_REVIEW' &&
+        task.status !== 'COMPLETED' &&
+        task.status !== 'CANCELLED';
+
+    const teamLeadCanReview =
+        userRole === 'TEAM_LEAD' &&
+        task.status === 'PENDING_REVIEW';
 
     const handleSaveProgress = async () => {
         try {
             setSaving(true);
             setMessage('');
 
-            await axios.post(
-                `${apiUrl}/tasks/${task.id}/updates`,
-                {
-                    progressPercent: Number(progress),
-                    comment: comment || undefined,
-                    hoursLogged: hoursLogged
-                        ? Number(hoursLogged)
-                        : undefined
-                },
-                {
-                    withCredentials: true
-                }
-            );
+            await api.post(`/tasks/${task.id}/updates`, {
+                progressPercent: Number(progress),
+                comment: comment || undefined,
+                hoursLogged: hoursLogged
+                    ? Number(hoursLogged)
+                    : undefined
+            });
 
             setMessage('Progress updated successfully');
             onUpdated?.();
         } catch (error: any) {
-            console.error(
-                'Progress update error:',
-                error
-            );
-
+            console.error('Progress update error:', error);
             setMessage(
                 error?.response?.data?.message ||
                 'Failed to update progress'
@@ -76,29 +71,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             setSaving(true);
             setMessage('');
 
-            await axios.put(
-                `${apiUrl}/tasks/${task.id}/status`,
-                {
-                    status: 'PENDING_REVIEW',
-                    progressPercent: progress,
-                    comment: comment || undefined
-                },
-                {
-                    withCredentials: true
-                }
-            );
+            await api.put(`/tasks/${task.id}/status`, {
+                status: 'PENDING_REVIEW',
+                progressPercent: progress,
+                comment: comment || undefined
+            });
 
-            setMessage(
-                'Task submitted for review'
-            );
-
+            setMessage('Task submitted for review');
             onUpdated?.();
         } catch (error: any) {
-            console.error(
-                'Submit review error:',
-                error
-            );
-
+            console.error('Submit review error:', error);
             setMessage(
                 error?.response?.data?.message ||
                 'Failed to submit task for review'
@@ -113,28 +95,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             setSaving(true);
             setMessage('');
 
-            await axios.put(
-                `${apiUrl}/tasks/${task.id}/status`,
-                {
-                    status: 'COMPLETED',
-                    progressPercent: 100
-                },
-                {
-                    withCredentials: true
-                }
-            );
+            await api.put(`/tasks/${task.id}/status`, {
+                status: 'COMPLETED',
+                progressPercent: 100
+            });
 
-            setMessage(
-                'Task approved and completed'
-            );
-
+            setMessage('Task approved and completed');
             onUpdated?.();
         } catch (error: any) {
-            console.error(
-                'Approval error:',
-                error
-            );
-
+            console.error('Approval error:', error);
             setMessage(
                 error?.response?.data?.message ||
                 'Failed to approve task'
@@ -146,9 +115,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
     const handleReject = async () => {
         if (!comment.trim()) {
-            setMessage(
-                'Please enter a comment when rejecting a task'
-            );
+            setMessage('Please enter a comment when rejecting a task');
             return;
         }
 
@@ -156,28 +123,15 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             setSaving(true);
             setMessage('');
 
-            await axios.put(
-                `${apiUrl}/tasks/${task.id}/status`,
-                {
-                    status: 'IN_PROGRESS',
-                    comment
-                },
-                {
-                    withCredentials: true
-                }
-            );
+            await api.put(`/tasks/${task.id}/status`, {
+                status: 'IN_PROGRESS',
+                comment
+            });
 
-            setMessage(
-                'Task returned to employee'
-            );
-
+            setMessage('Task returned to employee');
             onUpdated?.();
         } catch (error: any) {
-            console.error(
-                'Reject error:',
-                error
-            );
-
+            console.error('Reject error:', error);
             setMessage(
                 error?.response?.data?.message ||
                 'Failed to reject task'
@@ -186,15 +140,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             setSaving(false);
         }
     };
-
-    const employeeCanEdit =
-        userRole === 'EMPLOYEE' &&
-        task.status !== 'PENDING_REVIEW' &&
-        task.status !== 'COMPLETED';
-
-    const teamLeadCanReview =
-        userRole === 'TEAM_LEAD' &&
-        task.status === 'PENDING_REVIEW';
 
     return (
         <div
@@ -215,55 +160,32 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 }}
             >
                 <h3>{task.title}</h3>
-
-                <StatusBadge
-                    status={task.status}
-                />
+                <StatusBadge status={task.status} />
             </div>
 
             {task.description && (
-                <p
-                    style={{
-                        color: 'var(--text-secondary)'
-                    }}
-                >
+                <p style={{ color: 'var(--text-secondary)' }}>
                     {task.description}
                 </p>
             )}
 
-            <ProgressBar
-                percent={progress}
-            />
+            <ProgressBar percent={progress} />
 
-            <div
-                style={{
-                    marginTop: '0.75rem'
-                }}
-            >
-                <strong>
-                    Progress: {progress}%
-                </strong>
+            <div style={{ marginTop: '0.75rem' }}>
+                <strong>Progress: {progress}%</strong>
             </div>
 
             {task.dueDate && (
                 <p>
                     Due:{' '}
-                    {new Date(
-                        task.dueDate
-                    ).toLocaleDateString()}
+                    {new Date(task.dueDate).toLocaleDateString()}
                 </p>
             )}
 
             {employeeCanEdit && (
                 <>
-                    <div
-                        style={{
-                            marginTop: '1rem'
-                        }}
-                    >
-                        <label>
-                            Progress (%)
-                        </label>
+                    <div style={{ marginTop: '1rem' }}>
+                        <label>Progress (%)</label>
 
                         <input
                             type="number"
@@ -274,12 +196,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                                 setProgress(
                                     Math.min(
                                         99,
-                                        Math.max(
-                                            0,
-                                            Number(
-                                                e.target.value
-                                            )
-                                        )
+                                        Math.max(0, Number(e.target.value))
                                     )
                                 )
                             }
@@ -291,22 +208,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                         />
                     </div>
 
-                    <div
-                        style={{
-                            marginTop: '1rem'
-                        }}
-                    >
-                        <label>
-                            Comment
-                        </label>
+                    <div style={{ marginTop: '1rem' }}>
+                        <label>Comment</label>
 
                         <textarea
                             value={comment}
-                            onChange={(e) =>
-                                setComment(
-                                    e.target.value
-                                )
-                            }
+                            onChange={(e) => setComment(e.target.value)}
                             placeholder="Enter your progress update"
                             style={{
                                 width: '100%',
@@ -316,14 +223,8 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                         />
                     </div>
 
-                    <div
-                        style={{
-                            marginTop: '1rem'
-                        }}
-                    >
-                        <label>
-                            Hours Logged
-                        </label>
+                    <div style={{ marginTop: '1rem' }}>
+                        <label>Hours Logged</label>
 
                         <input
                             type="number"
@@ -331,9 +232,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                             step="0.5"
                             value={hoursLogged}
                             onChange={(e) =>
-                                setHoursLogged(
-                                    e.target.value
-                                )
+                                setHoursLogged(e.target.value)
                             }
                             placeholder="Example: 1.5"
                             style={{
@@ -354,61 +253,31 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                     >
                         <button
                             className="btn"
-                            onClick={
-                                handleSaveProgress
-                            }
+                            onClick={handleSaveProgress}
                             disabled={saving}
                         >
-                            {saving
-                                ? 'Saving...'
-                                : 'Save Progress'}
+                            {saving ? 'Saving...' : 'Save Progress'}
                         </button>
 
-                        {progress >= 100 && (
-                            <button
-                                className="btn"
-                                onClick={
-                                    handleSubmitForReview
-                                }
-                                disabled={saving}
-                            >
-                                Submit for Review
-                            </button>
-                        )}
-
-                        {progress < 100 && (
-                            <button
-                                className="btn"
-                                onClick={
-                                    handleSubmitForReview
-                                }
-                                disabled={saving}
-                            >
-                                Submit for Review
-                            </button>
-                        )}
+                        <button
+                            className="btn"
+                            onClick={handleSubmitForReview}
+                            disabled={saving}
+                        >
+                            Submit for Review
+                        </button>
                     </div>
                 </>
             )}
 
             {teamLeadCanReview && (
                 <>
-                    <div
-                        style={{
-                            marginTop: '1rem'
-                        }}
-                    >
-                        <label>
-                            Review Comment
-                        </label>
+                    <div style={{ marginTop: '1rem' }}>
+                        <label>Review Comment</label>
 
                         <textarea
                             value={comment}
-                            onChange={(e) =>
-                                setComment(
-                                    e.target.value
-                                )
-                            }
+                            onChange={(e) => setComment(e.target.value)}
                             placeholder="Enter approval or rejection comment"
                             style={{
                                 width: '100%',
@@ -427,9 +296,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                     >
                         <button
                             className="btn"
-                            onClick={
-                                handleApprove
-                            }
+                            onClick={handleApprove}
                             disabled={saving}
                         >
                             {saving
@@ -439,9 +306,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
 
                         <button
                             className="btn"
-                            onClick={
-                                handleReject
-                            }
+                            onClick={handleReject}
                             disabled={saving}
                         >
                             {saving

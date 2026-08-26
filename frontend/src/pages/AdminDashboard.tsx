@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import { PaginatedTable } from '../components/PaginatedTable';
+import { TaskManagementPanel } from '../components/TaskManagementPanel';
 
 export const AdminDashboard: React.FC = () => {
     const [orgStats, setOrgStats] = useState<any>(null);
@@ -22,6 +23,10 @@ export const AdminDashboard: React.FC = () => {
 
     return (
         <main className="dashboard-container">
+
+            <TaskManagementPanel
+                userRole="ADMIN"
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2rem' }}>
                 <h2>Admin Global Dashboard</h2>
                 <div style={{ display: 'flex', gap: '1rem' }}>
@@ -50,3 +55,6 @@ export const AdminDashboard: React.FC = () => {
         </main>
     );
 };
+
+
+
