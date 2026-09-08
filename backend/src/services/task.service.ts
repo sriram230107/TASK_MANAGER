@@ -1,1931 +1,926 @@
-// @ts-nocheck
-
 import { prisma } from '../utils/prisma';
-import { User } from '@prisma/client';
-import { addDays, addWeeks, addMonths } from 'date-fns';
+import { User, TaskStatus, TaskPriority, Role, Task } from '@prisma/client';
+import { isAuthorizedForTarget, isAuthorizedForTeam, isAuthorizedForDepartment } from '../utils/hierarchy';
+import { notifyTaskParticipants } from './notification.service';
 
 /*
 |--------------------------------------------------------------------------
-| TASK SERVICE
+| TASK LIFECYCLE & HIERARCHICAL SERVICE
 |--------------------------------------------------------------------------
 |
-| Organization hierarchy:
+| Role hierarchy: ADMIN > MANAGER > TEAM_LEAD > EMPLOYEE
 |
-| ADMIN
-|   └── MANAGER
-|         └── TEAM LEAD
-|               └── EMPLOYEE
+| Status flow:
+| DRAFT → ASSIGNED → ACCEPTED → IN_PROGRESS → (ON_HOLD) → SUBMITTED →
+| UNDER_REVIEW → COMPLETED | CHANGES_REQUESTED → back to IN_PROGRESS
 |
-| Task flow:
-|
-| ADMIN:
-|   - Can create/assign tasks anywhere inside organization
-|   - Can view/manage all organization tasks
-|
-| MANAGER:
-|   - Can create/assign tasks to teams under their Team Leads
-|   - Can assign to members of those teams
-|   - Can view/manage tasks belonging to their teams
-|
-| TEAM LEAD:
-|   - Can create/assign tasks within their own teams
-|   - Can assign to members of their teams
-|   - Can view/manage tasks belonging to their teams
-|
-| EMPLOYEE:
-|   - Can view only tasks assigned to themselves
-|   - Can update progress
-|   - Can submit task for review
-|
+| Derived: OVERDUE (automatic when dueDate < now && not COMPLETED/CANCELLED)
+| Terminus: CANCELLED
 |--------------------------------------------------------------------------
 */
 
+export interface CreateTaskInput {
+    title: string;
+    description?: string;
+    priority?: TaskPriority;
+    status?: string;
+    assignedManagerId?: string;
+    assignedTeamLeadId?: string;
+    assignedEmployeeId?: string;
+    assignedToId?: string;
+    departmentId?: string;
+    teamId?: string;
+    parentTaskId?: string;
+    dependencies?: string[];
+    estimatedHours?: number;
+    startDate?: string | null;
+    dueDate?: string | null;
+    recurrenceRule?: any;
+}
 
-/* =========================================================================
-   USER / HIERARCHY HELPERS
-   ========================================================================= */
+export interface UpdateTaskInput {
+    title?: string;
+    description?: string | null;
+    priority?: TaskPriority;
+    assignedManagerId?: string | null;
+    assignedTeamLeadId?: string | null;
+    assignedEmployeeId?: string | null;
+    assignedToId?: string | null;
+    departmentId?: string | null;
+    teamId?: string | null;
+    dependencies?: string[];
+    estimatedHours?: number | null;
+    actualHours?: number;
+    progressPercent?: number;
+    startDate?: string | null;
+    dueDate?: string | null;
+    completionNotes?: string | null;
+    reviewNotes?: string | null;
+}
 
-const getUserWithHierarchy = async (userId: string) => {
-    return prisma.user.findUnique({
-        where: {
-            id: userId,
-            deletedAt: null
-        },
-        include: {
-            manager: {
-                select: {
-                    id: true,
-                    role: true,
-                    organizationId: true,
-                    managerId: true
-                }
-            }
-        }
-    });
+export interface UpdateStatusInput {
+    status: string;
+    comment?: string;
+    progressPercent?: number;
+    hoursLogged?: number;
+    completionNotes?: string;
+    reviewNotes?: string;
+}
+
+export interface TaskQueryInput {
+    page?: number;
+    limit?: number;
+    status?: string;
+    priority?: TaskPriority;
+    departmentId?: string;
+    teamId?: string;
+    assignedTo?: string;
+    assignedEmployeeId?: string;
+    assignedTeamLeadId?: string;
+    assignedManagerId?: string;
+    parentTaskId?: string;
+    search?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+}
+
+/**
+ * Normalizes legacy status names to the specification's 11-step lifecycle.
+ */
+export const normalizeStatus = (status: string): TaskStatus => {
+    switch (status) {
+        case 'NOT_STARTED':
+            return 'DRAFT';
+        case 'BLOCKED':
+            return 'ON_HOLD';
+        case 'PENDING_REVIEW':
+            return 'UNDER_REVIEW';
+        default:
+            return status as TaskStatus;
+    }
 };
 
-
-/* =========================================================================
-   TASK ACCESS
-   ========================================================================= */
-
-const canAccessTask = async (
-    user: User,
-    task: any
-): Promise<boolean> => {
-
-    // Every task must belong to the same organization.
-    if (
-        task.organizationId !==
-        user.organizationId
-    ) {
+/**
+ * Checks if a user can access a specific task based on organizational scope.
+ */
+export const canAccessTask = async (user: User, task: any): Promise<boolean> => {
+    if (task.organizationId !== user.organizationId || task.deletedAt) {
         return false;
     }
 
-    // Deleted tasks are not accessible.
-    if (task.deletedAt) {
-        return false;
-    }
+    if (user.role === 'ADMIN') return true;
 
-    // ADMIN can access every task in the organization.
-    if (user.role === 'ADMIN') {
-        return true;
-    }
-
-    // EMPLOYEE can access only tasks assigned to them.
     if (user.role === 'EMPLOYEE') {
-        return task.assignedToId === user.id;
+        return (
+            task.assignedToId === user.id ||
+            task.assignedEmployeeId === user.id ||
+            task.createdById === user.id
+        );
     }
 
-    // TEAM LEAD can access tasks belonging to their own teams.
     if (user.role === 'TEAM_LEAD') {
+        if (
+            task.assignedTeamLeadId === user.id ||
+            task.assignedEmployeeId === user.id ||
+            task.createdById === user.id
+        ) {
+            return true;
+        }
 
-        const team = await prisma.team.findFirst({
-            where: {
-                id: task.teamId,
-                organizationId: user.organizationId,
-                teamLeadId: user.id
-            }
-        });
+        if (task.teamId) {
+            const team = await prisma.team.findFirst({
+                where: { id: task.teamId, teamLeadId: user.id }
+            });
+            if (team) return true;
+        }
 
-        return !!team;
+        if (task.assignedToId) {
+            return await isAuthorizedForTarget(user, task.assignedToId);
+        }
+
+        return false;
     }
 
-    // MANAGER can access tasks belonging to teams
-    // whose Team Lead reports to this Manager.
     if (user.role === 'MANAGER') {
+        if (
+            task.assignedManagerId === user.id ||
+            task.createdById === user.id
+        ) {
+            return true;
+        }
 
-        const team = await prisma.team.findFirst({
-            where: {
-                id: task.teamId,
-                organizationId: user.organizationId,
-                teamLead: {
-                    managerId: user.id
+        if (task.departmentId) {
+            const dept = await prisma.department.findFirst({
+                where: {
+                    id: task.departmentId,
+                    OR: [
+                        { managerId: user.id },
+                        ...(user.departmentId ? [{ id: user.departmentId }] : [])
+                    ]
                 }
-            }
-        });
+            });
+            if (dept) return true;
+        }
 
-        return !!team;
+        if (task.teamId) {
+            const team = await prisma.team.findFirst({
+                where: {
+                    id: task.teamId,
+                    OR: [
+                        { teamLead: { managerId: user.id } },
+                        { department: { managerId: user.id } }
+                    ]
+                }
+            });
+            if (team) return true;
+        }
+
+        if (task.assignedToId) {
+            return await isAuthorizedForTarget(user, task.assignedToId);
+        }
+
+        return false;
     }
 
     return false;
 };
 
+/**
+ * Creates a new task with strict server-side tenant isolation and hierarchy validation.
+ */
+export const createTask = async (creator: User, data: CreateTaskInput) => {
+    const organizationId = creator.organizationId;
+    let targetEmployeeId = data.assignedEmployeeId || data.assignedToId || null;
+    let targetLeadId = data.assignedTeamLeadId || null;
+    let targetManagerId = data.assignedManagerId || null;
+    let departmentId = data.departmentId || null;
+    let teamId = data.teamId || null;
 
-/* =========================================================================
-   TEAM / ASSIGNEE VALIDATION
-   ========================================================================= */
-
-const validateAssigneeForTeam = async (
-    user: User,
-    assignedToId: string,
-    teamId: string
-) => {
-
-    /*
-    |--------------------------------------------------------------------------
-    | Find assignee
-    |--------------------------------------------------------------------------
-    */
-
-    const assignee = await prisma.user.findUnique({
-        where: {
-            id: assignedToId,
-            deletedAt: null
-        },
-        select: {
-            id: true,
-            name: true,
-            role: true,
-            organizationId: true,
-            managerId: true
-        }
-    });
-
-    if (!assignee) {
-        throw new Error(
-            'Assignee not found'
-        );
+    // 1. Role-specific creation constraints
+    if (creator.role === 'EMPLOYEE') {
+        throw new Error('Employees are not authorized to create organization tasks');
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Organization protection
-    |--------------------------------------------------------------------------
-    */
+    if (creator.role === 'TEAM_LEAD') {
+        // Team Lead must assign within own team
+        const ledTeam = await prisma.team.findFirst({
+            where: { organizationId, teamLeadId: creator.id }
+        });
 
-    if (
-        assignee.organizationId !==
-        user.organizationId
-    ) {
-        throw new Error(
-            'Assignee belongs to another organization'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Only employees and team leads can be task assignees.
-    |
-    | Manager/Admin are task creators/supervisors,
-    | not normal task assignees.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        assignee.role !== 'EMPLOYEE' &&
-        assignee.role !== 'TEAM_LEAD'
-    ) {
-        throw new Error(
-            'Tasks can only be assigned to employees or team leads'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Find team
-    |--------------------------------------------------------------------------
-    */
-
-    const team = await prisma.team.findUnique({
-        where: {
-            id: teamId
-        },
-        include: {
-            teamLead: {
-                select: {
-                    id: true,
-                    name: true,
-                    managerId: true,
-                    organizationId: true
-                }
-            }
-        }
-    });
-
-    if (!team) {
-        throw new Error(
-            'Team not found'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Team organization protection
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        team.organizationId !==
-        user.organizationId
-    ) {
-        throw new Error(
-            'Team belongs to another organization'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | TEAM LEAD
-    |--------------------------------------------------------------------------
-    |
-    | Team Lead can assign only inside their own team.
-    |--------------------------------------------------------------------------
-    */
-
-    if (user.role === 'TEAM_LEAD') {
-
-        if (
-            team.teamLeadId !==
-            user.id
-        ) {
-            throw new Error(
-                'You can only assign tasks within your own team'
-            );
-        }
-
-        const membership =
-            await prisma.teamMember.findFirst({
-                where: {
-                    teamId,
-                    userId: assignedToId
-                }
+        if (!teamId && ledTeam) {
+            teamId = ledTeam.id;
+        } else if (teamId) {
+            const validTeam = await prisma.team.findFirst({
+                where: { id: teamId, organizationId, teamLeadId: creator.id }
             });
-
-        /*
-        | A Team Lead may assign to a member of the team.
-        |
-        | Additionally, the Team Lead can assign a task
-        | to themselves.
-        */
-
-        if (
-            assignedToId !== user.id &&
-            !membership
-        ) {
-            throw new Error(
-                'Assignee is not a member of your team'
-            );
-        }
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | MANAGER
-    |--------------------------------------------------------------------------
-    |
-    | Manager can assign to ANY team under their Team Leads.
-    |
-    | This is the important correction.
-    |--------------------------------------------------------------------------
-    */
-
-    if (user.role === 'MANAGER') {
-
-        if (
-            team.teamLead.managerId !==
-            user.id
-        ) {
-            throw new Error(
-                'You can only assign tasks to teams under your management'
-            );
-        }
-
-        const membership =
-            await prisma.teamMember.findFirst({
-                where: {
-                    teamId,
-                    userId: assignedToId
-                }
-            });
-
-        /*
-        | Team Lead itself can also receive a task.
-        |
-        | Otherwise the Manager could only assign to
-        | Team Members and never directly to the Team Lead.
-        */
-
-        const isTeamLead =
-            team.teamLeadId ===
-            assignedToId;
-
-        if (
-            !isTeamLead &&
-            !membership
-        ) {
-            throw new Error(
-                'Assignee is not a member of this team'
-            );
-        }
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | ADMIN
-    |--------------------------------------------------------------------------
-    |
-    | Admin can assign anywhere inside organization.
-    |
-    | We still verify that the assignee belongs to the team
-    | to keep the organization structure consistent.
-    |--------------------------------------------------------------------------
-    */
-
-    if (user.role === 'ADMIN') {
-
-        const membership =
-            await prisma.teamMember.findFirst({
-                where: {
-                    teamId,
-                    userId: assignedToId
-                }
-            });
-
-        const isTeamLead =
-            team.teamLeadId ===
-            assignedToId;
-
-        if (
-            !membership &&
-            !isTeamLead
-        ) {
-            throw new Error(
-                'Assignee must belong to the selected team'
-            );
-        }
-    }
-
-    return {
-        assignee,
-        team
-    };
-};
-
-
-/* =========================================================================
-   TASK CREATION VALIDATION
-   ========================================================================= */
-
-export const validateTaskCreation = async (
-    user: User,
-    data: any
-) => {
-
-    /*
-    |--------------------------------------------------------------------------
-    | Employee cannot create tasks.
-    |--------------------------------------------------------------------------
-    */
-
-    if (user.role === 'EMPLOYEE') {
-        throw new Error(
-            'Employees cannot create tasks for others'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Only Admin, Manager and Team Lead can create tasks.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        ![
-            'ADMIN',
-            'MANAGER',
-            'TEAM_LEAD'
-        ].includes(user.role)
-    ) {
-        throw new Error(
-            'You are not authorized to create tasks'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Validate assignee + team according to hierarchy.
-    |--------------------------------------------------------------------------
-    */
-
-    const {
-        assignee,
-        team
-    } =
-        await validateAssigneeForTeam(
-            user,
-            data.assignedToId,
-            data.teamId
-        );
-
-    /*
-    |--------------------------------------------------------------------------
-    | Parent task / subtask validation
-    |--------------------------------------------------------------------------
-    */
-
-    if (data.parentTaskId) {
-
-        const parentTask =
-            await prisma.task.findUnique({
-                where: {
-                    id: data.parentTaskId
-                }
-            });
-
-        if (!parentTask) {
-            throw new Error(
-                'Parent task not found'
-            );
-        }
-
-        if (
-            parentTask.deletedAt
-        ) {
-            throw new Error(
-                'Parent task is no longer active'
-            );
-        }
-
-        if (
-            parentTask.organizationId !==
-            user.organizationId
-        ) {
-            throw new Error(
-                'Parent task belongs to another organization'
-            );
-        }
-
-        /*
-        | Prevent more than one level of subtasks.
-        */
-
-        if (parentTask.parentTaskId) {
-            throw new Error(
-                'Subtask depth cannot exceed 2 levels'
-            );
-        }
-
-        /*
-        | Parent and child must belong to same team.
-        */
-
-        if (
-            parentTask.teamId !==
-            data.teamId
-        ) {
-            throw new Error(
-                'Subtask must belong to the same team as its parent task'
-            );
-        }
-
-        /*
-        | TEAM LEAD:
-        | Can create subtasks only under tasks
-        | in their own team.
-        */
-
-        if (
-            user.role ===
-            'TEAM_LEAD'
-        ) {
-
-            const parentAccessible =
-                await canAccessTask(
-                    user,
-                    parentTask
-                );
-
-            if (!parentAccessible) {
-                throw new Error(
-                    'You can only create subtasks under tasks in your own team'
-                );
+            if (!validTeam) {
+                throw new Error('Team Leads can only create tasks for teams they lead');
             }
         }
 
-        /*
-        | MANAGER:
-        | Can create subtasks under any task
-        | belonging to their managed teams.
-        */
+        targetLeadId = creator.id;
 
-        if (
-            user.role ===
-            'MANAGER'
-        ) {
+        if (targetEmployeeId) {
+            const validMember = await isAuthorizedForTarget(creator, targetEmployeeId);
+            if (!validMember) {
+                throw new Error('Cannot assign task to employee outside your team');
+            }
+        }
+    }
 
-            const parentAccessible =
-                await canAccessTask(
-                    user,
-                    parentTask
-                );
-
-            if (!parentAccessible) {
-                throw new Error(
-                    'You can only create subtasks under tasks in your managed teams'
-                );
+    if (creator.role === 'MANAGER') {
+        // Manager scopes to assigned department
+        if (!departmentId && creator.departmentId) {
+            departmentId = creator.departmentId;
+        } else if (departmentId) {
+            const validDept = await isAuthorizedForDepartment(creator, departmentId);
+            if (!validDept) {
+                throw new Error('Cannot create task for department outside your scope');
             }
         }
 
-        /*
-        | ADMIN:
-        | Organization check above is sufficient.
-        */
+        targetManagerId = creator.id;
+
+        if (targetLeadId) {
+            const validLead = await isAuthorizedForTarget(creator, targetLeadId);
+            if (!validLead) {
+                throw new Error('Cannot assign task to Team Lead outside your scope');
+            }
+        }
     }
 
-    return {
-        assignedTo: assignee,
-        team
-    };
-};
+    // Determine initial status
+    let initialStatus = normalizeStatus(data.status || 'DRAFT');
+    if (initialStatus === 'DRAFT' && (targetEmployeeId || targetLeadId)) {
+        initialStatus = 'ASSIGNED';
+    }
 
-
-/* =========================================================================
-   CREATE TASK
-   ========================================================================= */
-
-export const createTask = async (
-    user: User,
-    data: any
-) => {
-
-    await validateTaskCreation(
-        user,
-        data
-    );
-
-    const {
-        recurrenceRule,
-        ...taskData
-    } = data;
-
-    /*
-    |--------------------------------------------------------------------------
-    | Remove fields that should not be directly supplied by frontend.
-    |--------------------------------------------------------------------------
-    */
+    // Primary assignee for legacy compatibility
+    const primaryAssigneeId = targetEmployeeId || targetLeadId || targetManagerId || creator.id;
 
     const task = await prisma.task.create({
         data: {
-            title:
-                taskData.title,
-
-            description:
-                taskData.description,
-
-            assignedToId:
-                taskData.assignedToId,
-
-            teamId:
-                taskData.teamId,
-
-            parentTaskId:
-                taskData.parentTaskId,
-
-            priority:
-                taskData.priority ??
-                'MEDIUM',
-
-            estimatedHours:
-                taskData.estimatedHours,
-
-            startDate:
-                taskData.startDate,
-
-            dueDate:
-                taskData.dueDate,
-
-            createdById:
-                user.id,
-
-            organizationId:
-                user.organizationId,
-
-            status:
-                'NOT_STARTED',
-
-            progressPercent:
-                0,
-
-            actualHours:
-                0
+            title: data.title,
+            description: data.description,
+            priority: data.priority || 'MEDIUM',
+            status: initialStatus,
+            createdById: creator.id,
+            assignedManagerId: targetManagerId,
+            assignedTeamLeadId: targetLeadId,
+            assignedEmployeeId: targetEmployeeId,
+            assignedToId: primaryAssigneeId,
+            departmentId,
+            teamId,
+            parentTaskId: data.parentTaskId || null,
+            dependencies: data.dependencies || [],
+            estimatedHours: data.estimatedHours,
+            startDate: data.startDate ? new Date(data.startDate) : null,
+            dueDate: data.dueDate ? new Date(data.dueDate) : null,
+            organizationId
+        },
+        include: {
+            assignedTo: { select: { id: true, name: true, email: true, role: true } },
+            assignedManager: { select: { id: true, name: true, email: true } },
+            assignedTeamLead: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true, role: true } },
+            department: { select: { id: true, name: true } },
+            team: { select: { id: true, name: true } }
         }
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Recurring task
-    |--------------------------------------------------------------------------
-    */
+    // Create initial audit/history record
+    await prisma.taskHistory.create({
+        data: {
+            taskId: task.id,
+            userId: creator.id,
+            action: 'CREATED',
+            toStatus: initialStatus,
+            details: `Task created with priority ${task.priority}`
+        }
+    });
 
-    if (recurrenceRule) {
-
-        await prisma.recurrenceRule.create({
+    // Create assignment record if assigned to an employee
+    if (targetEmployeeId) {
+        await prisma.taskAssignment.create({
             data: {
-                taskId:
-                    task.id,
-
-                frequency:
-                    recurrenceRule.frequency,
-
-                interval:
-                    recurrenceRule.interval ||
-                    1,
-
-                endDate:
-                    recurrenceRule.endDate
+                taskId: task.id,
+                userId: targetEmployeeId,
+                role: 'ASSIGNEE'
             }
         });
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Activity log
-    |--------------------------------------------------------------------------
-    */
-
-    await prisma.activityLog.create({
-        data: {
-            userId:
-                user.id,
-
-            action:
-                'CREATE_TASK',
-
-            entity:
-                'Task',
-
-            entityId:
-                task.id
-        }
-    });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Notify assignee
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        task.assignedToId !==
-        user.id
-    ) {
-
-        await prisma.notification.create({
-            data: {
-                userId:
-                    task.assignedToId,
-
-                taskId:
-                    task.id,
-
-                type:
-                    'TASK_ASSIGNED'
-            }
-        });
+    // Notify assigned participants
+    if (targetEmployeeId || targetLeadId) {
+        await notifyTaskParticipants(
+            task.id,
+            creator,
+            'TASK_ASSIGNED',
+            `You have been assigned to task: "${task.title}"`
+        ).catch(() => {});
     }
 
     return task;
 };
 
+/**
+ * Updates task fields (metadata, assignees, dates).
+ */
+export const updateTask = async (user: User, taskId: string, data: UpdateTaskInput) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
 
-/* =========================================================================
-   UPDATE TASK
-   ========================================================================= */
-
-export const updateTask = async (
-    user: User,
-    taskId: string,
-    data: any
-) => {
-
-    const task =
-        await prisma.task.findUnique({
-            where: {
-                id: taskId
-            }
-        });
-
-    if (!task) {
-        throw new Error(
-            'Task not found'
-        );
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You do not have access to this task');
     }
 
-    if (
-        !(await canAccessTask(
-            user,
-            task
-        ))
-    ) {
-        throw new Error(
-            'Forbidden: You cannot modify this task'
-        );
+    // Role check for full edits
+    if (user.role === 'EMPLOYEE') {
+        throw new Error('Employees can only update progress and status on assigned tasks');
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Employee cannot edit assignment/details.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        user.role ===
-        'EMPLOYEE'
-    ) {
-        throw new Error(
-            'Employees cannot edit task assignments'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | If assignment/team changes,
-    | validate the new hierarchy.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.assignedToId ||
-        data.teamId
-    ) {
-
-        const assignedToId =
-            data.assignedToId ??
-            task.assignedToId;
-
-        const teamId =
-            data.teamId ??
-            task.teamId;
-
-        await validateAssigneeForTeam(
-            user,
-            assignedToId,
-            teamId
-        );
-    }
-
-    const oldAssigneeId =
-        task.assignedToId;
-
-    /*
-    |--------------------------------------------------------------------------
-    | Build safe update object.
-    |--------------------------------------------------------------------------
-    */
 
     const updateData: any = {};
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.priority !== undefined) updateData.priority = data.priority;
+    if (data.departmentId !== undefined) updateData.departmentId = data.departmentId;
+    if (data.teamId !== undefined) updateData.teamId = data.teamId;
+    if (data.dependencies !== undefined) updateData.dependencies = data.dependencies;
+    if (data.estimatedHours !== undefined) updateData.estimatedHours = data.estimatedHours;
+    if (data.actualHours !== undefined) updateData.actualHours = data.actualHours;
+    if (data.progressPercent !== undefined) updateData.progressPercent = data.progressPercent;
+    if (data.completionNotes !== undefined) updateData.completionNotes = data.completionNotes;
+    if (data.reviewNotes !== undefined) updateData.reviewNotes = data.reviewNotes;
+    if (data.startDate !== undefined) updateData.startDate = data.startDate ? new Date(data.startDate) : null;
+    if (data.dueDate !== undefined) updateData.dueDate = data.dueDate ? new Date(data.dueDate) : null;
 
-    const allowedFields = [
-        'title',
-        'description',
-        'assignedToId',
-        'teamId',
-        'priority',
-        'estimatedHours',
-        'startDate',
-        'dueDate'
-    ];
+    if (data.assignedEmployeeId !== undefined) {
+        updateData.assignedEmployeeId = data.assignedEmployeeId;
+        if (data.assignedEmployeeId) updateData.assignedToId = data.assignedEmployeeId;
+    }
+    if (data.assignedTeamLeadId !== undefined) updateData.assignedTeamLeadId = data.assignedTeamLeadId;
+    if (data.assignedManagerId !== undefined) updateData.assignedManagerId = data.assignedManagerId;
 
-    for (
-        const field of allowedFields
-    ) {
-        if (
-            data[field] !==
-            undefined
-        ) {
-            updateData[field] =
-                data[field];
+    const updatedTask = await prisma.task.update({
+        where: { id: taskId },
+        data: updateData,
+        include: {
+            assignedTo: { select: { id: true, name: true, email: true, role: true } },
+            assignedManager: { select: { id: true, name: true } },
+            assignedTeamLead: { select: { id: true, name: true } },
+            department: { select: { id: true, name: true } },
+            team: { select: { id: true, name: true } }
         }
-    }
+    });
 
-    const updatedTask =
-        await prisma.task.update({
-            where: {
-                id: taskId
-            },
-            data: updateData
-        });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Assignment activity
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.assignedToId &&
-        oldAssigneeId !==
-            data.assignedToId
-    ) {
-
-        await prisma.activityLog.create({
-            data: {
-                userId:
-                    user.id,
-
-                action:
-                    'ASSIGNMENT_CHANGED',
-
-                entity:
-                    'Task',
-
-                entityId:
-                    taskId
-            }
-        });
-
-        /*
-        | Notify new assignee.
-        */
-
-        await prisma.notification.create({
-            data: {
-                userId:
-                    data.assignedToId,
-
-                taskId:
-                    taskId,
-
-                type:
-                    'TASK_ASSIGNED'
-            }
-        });
-    }
-
-    await prisma.activityLog.create({
+    await prisma.taskHistory.create({
         data: {
-            userId:
-                user.id,
-
-            action:
-                'UPDATE_TASK',
-
-            entity:
-                'Task',
-
-            entityId:
-                taskId
+            taskId: task.id,
+            userId: user.id,
+            action: 'UPDATED',
+            details: 'Task details updated'
         }
     });
 
     return updatedTask;
 };
 
+/**
+ * Updates task status and logs progress through the defined state machine.
+ */
+export const updateTaskStatus = async (user: User, taskId: string, data: UpdateStatusInput) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
 
-/* =========================================================================
-   UPDATE TASK STATUS
-   ========================================================================= */
-
-export const updateTaskStatus = async (
-    user: User,
-    taskId: string,
-    data: any
-) => {
-
-    const task =
-        await prisma.task.findUnique({
-            where: {
-                id: taskId
-            },
-            include: {
-                subTasks: true,
-
-                team: {
-                    select: {
-                        id: true,
-                        teamLeadId: true,
-                        organizationId: true
-                    }
-                },
-
-                recurrenceRule: true
-            }
-        });
-
-    if (!task) {
-        throw new Error(
-            'Task not found'
-        );
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You do not have access to this task');
     }
 
-    if (
-        !(await canAccessTask(
-            user,
-            task
-        ))
-    ) {
-        throw new Error(
-            'Forbidden: You cannot modify this task'
-        );
-    }
+    const currentStatus = task.status;
+    const targetStatus = normalizeStatus(data.status);
 
-    /*
-    |--------------------------------------------------------------------------
-    | EMPLOYEE STATUS FLOW
-    |--------------------------------------------------------------------------
-    |
-    | Employee can:
-    |   NOT_STARTED -> IN_PROGRESS
-    |   IN_PROGRESS -> BLOCKED
-    |   IN_PROGRESS -> ON_HOLD
-    |   IN_PROGRESS -> PENDING_REVIEW
-    |
-    | Employee cannot directly complete the task.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        user.role ===
-        'EMPLOYEE'
-    ) {
-
-        if (
-            task.assignedToId !==
-            user.id
-        ) {
-            throw new Error(
-                'Only the assignee can update this task'
-            );
+    // Validate state transitions per /PROJECT_SPEC.md
+    if (user.role === 'EMPLOYEE') {
+        const isAssignee = task.assignedToId === user.id || task.assignedEmployeeId === user.id;
+        if (!isAssignee) {
+            throw new Error('Forbidden: You can only update tasks assigned to you');
         }
 
-        if (
-            data.status ===
-                'COMPLETED'
-        ) {
+        const allowedTransitions: Record<string, TaskStatus[]> = {
+            ASSIGNED: ['ACCEPTED', 'IN_PROGRESS'],
+            ACCEPTED: ['IN_PROGRESS', 'ON_HOLD'],
+            IN_PROGRESS: ['ON_HOLD', 'SUBMITTED', 'UNDER_REVIEW'],
+            ON_HOLD: ['IN_PROGRESS'],
+            CHANGES_REQUESTED: ['IN_PROGRESS']
+        };
+
+        const allowed = allowedTransitions[currentStatus] || [];
+        if (!allowed.includes(targetStatus) && targetStatus !== currentStatus) {
             throw new Error(
-                'Employees must submit the task for review before completion'
-            );
-        }
-
-        /*
-        | 100% means review.
-        */
-
-        if (
-            data.progressPercent ===
-            100
-        ) {
-
-            if (
-                data.status !==
-                'PENDING_REVIEW'
-            ) {
-                throw new Error(
-                    '100% progress must be submitted for review'
-                );
-            }
-        }
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | PENDING REVIEW
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.status ===
-        'PENDING_REVIEW'
-    ) {
-
-        if (
-            user.id !==
-            task.assignedToId
-        ) {
-            throw new Error(
-                'Only the assignee can submit a task for review'
-            );
-        }
-
-        if (
-            data.progressPercent !==
-                undefined &&
-            data.progressPercent <
-                100
-        ) {
-            throw new Error(
-                'A task must be 100% complete before submitting for review'
+                `Invalid transition: Employees cannot change status from ${currentStatus} to ${targetStatus}`
             );
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | COMPLETION AUTHORITY
-    |--------------------------------------------------------------------------
-    |
-    | Admin:
-    |   Can complete any task.
-    |
-    | Manager:
-    |   Can complete tasks in managed teams.
-    |
-    | Team Lead:
-    |   Can complete tasks in own teams.
-    |
-    | Employee:
-    |   Cannot directly complete.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.status ===
-        'COMPLETED'
-    ) {
-
-        if (
-            user.role ===
-            'EMPLOYEE'
-        ) {
-            throw new Error(
-                'Employees cannot directly complete tasks'
-            );
-        }
-
-        /*
-        | Parent task cannot be completed
-        | while subtasks remain incomplete.
-        */
-
-        const incompleteSubTasks =
-            task.subTasks.filter(
-                (st: any) =>
-                    st.status !==
-                        'COMPLETED' &&
-                    st.status !==
-                        'CANCELLED'
-            );
-
-        if (
-            incompleteSubTasks.length >
-            0
-        ) {
-            throw new Error(
-                'All subtasks must be completed before completing this task'
-            );
+    if (targetStatus === 'COMPLETED' || targetStatus === 'CHANGES_REQUESTED') {
+        // Review outcomes require manager, team lead, or admin
+        if (user.role === 'EMPLOYEE') {
+            throw new Error('Employees cannot approve completion or request changes. Please submit for review.');
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | REVIEW REJECTION
-    |--------------------------------------------------------------------------
-    |
-    | Manager / Team Lead / Admin can send
-    | a reviewed task back to IN_PROGRESS.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.status ===
-            'IN_PROGRESS' &&
-        task.status ===
-            'PENDING_REVIEW'
-    ) {
-
-        if (
-            user.role ===
-            'EMPLOYEE'
-        ) {
-            throw new Error(
-                'Employee cannot reject their own review'
-            );
-        }
-
-        if (
-            !data.comment
-        ) {
-            throw new Error(
-                'Rejecting a review requires a comment'
-            );
-        }
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Progress normalization
-    |--------------------------------------------------------------------------
-    */
-
-    let progress =
-        data.progressPercent ??
-        task.progressPercent;
-
-    if (
-        data.status ===
-        'COMPLETED'
-    ) {
-        progress = 100;
-    }
-
-    if (
-        data.status ===
-        'NOT_STARTED'
-    ) {
-        progress = 0;
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Actual hours
-    |--------------------------------------------------------------------------
-    */
-
-    const statusUpdateData: any = {
-        status:
-            data.status,
-
-        progressPercent:
-            progress,
-
-        completedAt:
-            data.status ===
-            'COMPLETED'
-                ? new Date()
-                : null
+    const updatePayload: any = {
+        status: targetStatus
     };
 
-    if (
-        data.hoursLogged !==
-        undefined
-    ) {
-        statusUpdateData.actualHours = {
-            increment:
-                data.hoursLogged
-        };
+    if (data.progressPercent !== undefined) {
+        updatePayload.progressPercent = data.progressPercent;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Update task
-    |--------------------------------------------------------------------------
-    */
-
-    const updatedTask =
-        await prisma.task.update({
-            where: {
-                id: taskId
-            },
-            data:
-                statusUpdateData
-        });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Task update history
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.comment ||
-        data.progressPercent !==
-            undefined ||
-        data.hoursLogged !==
-            undefined
-    ) {
-
-        await prisma.taskUpdate.create({
-            data: {
-                taskId:
-                    taskId,
-
-                userId:
-                    user.id,
-
-                progressPercent:
-                    progress,
-
-                comment:
-                    data.comment,
-
-                hoursLogged:
-                    data.hoursLogged
-            }
-        });
+    if (data.hoursLogged && data.hoursLogged > 0) {
+        updatePayload.actualHours = (task.actualHours || 0) + data.hoursLogged;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Notify relevant people
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.status ===
-        'PENDING_REVIEW'
-    ) {
-
-        /*
-        | Notify Team Lead.
-        */
-
-        if (
-            task.team?.teamLeadId
-        ) {
-
-            await prisma.notification.create({
-                data: {
-                    userId:
-                        task.team.teamLeadId,
-
-                    taskId:
-                        task.id,
-
-                    type:
-                        'TASK_REVIEW_REQUIRED'
-                }
-            });
-        }
+    if (targetStatus === 'COMPLETED') {
+        updatePayload.completedAt = new Date();
+        updatePayload.progressPercent = 100;
+        if (data.completionNotes) updatePayload.completionNotes = data.completionNotes;
     }
 
-    if (
-        data.status ===
-        'COMPLETED'
-    ) {
-
-        /*
-        | Notify creator if creator is not
-        | the person completing the task.
-        */
-
-        if (
-            task.createdById !==
-            user.id
-        ) {
-
-            await prisma.notification.create({
-                data: {
-                    userId:
-                        task.createdById,
-
-                    taskId:
-                        task.id,
-
-                    type:
-                        'TASK_COMPLETED'
-                }
-            });
-        }
+    if (data.reviewNotes) {
+        updatePayload.reviewNotes = data.reviewNotes;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Recurring task
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.status ===
-            'COMPLETED' &&
-        updatedTask.recurrenceRule
-    ) {
-
-        const rule =
-            updatedTask.recurrenceRule;
-
-        const now =
-            new Date();
-
-        let shouldRecur =
-            true;
-
-        if (
-            rule.endDate &&
-            new Date(
-                rule.endDate
-            ) < now
-        ) {
-            shouldRecur =
-                false;
-        }
-
-        if (shouldRecur) {
-
-            let nextStart =
-                updatedTask.startDate
-                    ? new Date(
-                          updatedTask.startDate
-                      )
-                    : new Date();
-
-            let nextDue =
-                updatedTask.dueDate
-                    ? new Date(
-                          updatedTask.dueDate
-                      )
-                    : new Date();
-
-            if (
-                rule.frequency ===
-                'DAILY'
-            ) {
-
-                nextStart =
-                    addDays(
-                        nextStart,
-                        rule.interval
-                    );
-
-                nextDue =
-                    addDays(
-                        nextDue,
-                        rule.interval
-                    );
-            }
-
-            else if (
-                rule.frequency ===
-                'WEEKLY'
-            ) {
-
-                nextStart =
-                    addWeeks(
-                        nextStart,
-                        rule.interval
-                    );
-
-                nextDue =
-                    addWeeks(
-                        nextDue,
-                        rule.interval
-                    );
-            }
-
-            else if (
-                rule.frequency ===
-                'MONTHLY'
-            ) {
-
-                nextStart =
-                    addMonths(
-                        nextStart,
-                        rule.interval
-                    );
-
-                nextDue =
-                    addMonths(
-                        nextDue,
-                        rule.interval
-                    );
-            }
-
-            /*
-            | Create next occurrence.
-            */
-
-            const clonedTask =
-                await prisma.task.create({
-                    data: {
-
-                        title:
-                            updatedTask.title,
-
-                        description:
-                            updatedTask.description,
-
-                        createdById:
-                            updatedTask.createdById,
-
-                        assignedToId:
-                            updatedTask.assignedToId,
-
-                        teamId:
-                            updatedTask.teamId,
-
-                        parentTaskId:
-                            updatedTask.parentTaskId,
-
-                        organizationId:
-                            updatedTask.organizationId,
-
-                        priority:
-                            updatedTask.priority,
-
-                        estimatedHours:
-                            updatedTask.estimatedHours,
-
-                        startDate:
-                            nextStart,
-
-                        dueDate:
-                            nextDue,
-
-                        status:
-                            'NOT_STARTED',
-
-                        progressPercent:
-                            0,
-
-                        actualHours:
-                            0
-                    }
-                });
-
-            /*
-            | Move recurrence rule to the
-            | newly created occurrence.
-            */
-
-            await prisma.recurrenceRule.update({
-                where: {
-                    id:
-                        rule.id
-                },
-                data: {
-                    taskId:
-                        clonedTask.id
-                }
-            });
-        }
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Activity log
-    |--------------------------------------------------------------------------
-    */
-
-    await prisma.activityLog.create({
-        data: {
-            userId:
-                user.id,
-
-            action:
-                'STATUS_CHANGE',
-
-            entity:
-                'Task',
-
-            entityId:
-                taskId
+    const updated = await prisma.task.update({
+        where: { id: taskId },
+        data: updatePayload,
+        include: {
+            assignedTo: { select: { id: true, name: true, email: true, role: true } },
+            team: { select: { id: true, name: true } },
+            department: { select: { id: true, name: true } }
         }
     });
 
-    return updatedTask;
+    // Record audit history
+    await prisma.taskHistory.create({
+        data: {
+            taskId: task.id,
+            userId: user.id,
+            action: 'STATUS_CHANGE',
+            fromStatus: currentStatus,
+            toStatus: targetStatus,
+            details: data.comment || data.reviewNotes || data.completionNotes || `Status changed from ${currentStatus} to ${targetStatus}`
+        }
+    });
+
+    // Record legacy TaskUpdate for backward compatibility with frontend
+    if (data.progressPercent !== undefined || data.comment || data.hoursLogged) {
+        await prisma.taskUpdate.create({
+            data: {
+                taskId: task.id,
+                userId: user.id,
+                progressPercent: data.progressPercent ?? task.progressPercent,
+                comment: data.comment || null,
+                hoursLogged: data.hoursLogged || null
+            }
+        });
+    }
+
+    // Notify other task stakeholders
+    await notifyTaskParticipants(
+        task.id,
+        user,
+        'TASK_STATUS_CHANGED',
+        `Status updated from ${currentStatus} to ${targetStatus} by ${user.name}`
+    ).catch(() => {});
+
+    return updated;
 };
 
-
-/* =========================================================================
-   LOG TASK PROGRESS
-   ========================================================================= */
-
+/**
+ * Logs progress, comments, and working hours on a task.
+ */
 export const logTaskProgress = async (
     user: User,
     taskId: string,
-    data: any
+    data: { progressPercent: number; comment?: string; hoursLogged?: number }
 ) => {
-
-    const task =
-        await prisma.task.findUnique({
-            where: {
-                id: taskId
-            }
-        });
-
-    if (!task) {
-        throw new Error(
-            'Task not found'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Only same organization.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        task.organizationId !==
-        user.organizationId
-    ) {
-        throw new Error(
-            'Forbidden'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Only assignee can log normal progress.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        task.assignedToId !==
-        user.id
-    ) {
-        throw new Error(
-            'Only assignee can log progress'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Employee cannot log progress on completed/cancelled task.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        task.status ===
-            'COMPLETED' ||
-        task.status ===
-            'CANCELLED'
-    ) {
-        throw new Error(
-            'This task is no longer active'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | 100% must use review workflow.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        data.progressPercent ===
-        100
-    ) {
-        throw new Error(
-            '100% progress requires submitting the task for review'
-        );
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Update actual hours.
-    |--------------------------------------------------------------------------
-    */
-
-    const updatedTask =
-        await prisma.task.update({
-            where: {
-                id: taskId
-            },
-            data: {
-
-                progressPercent:
-                    data.progressPercent,
-
-                actualHours:
-                    data.hoursLogged !==
-                    undefined
-                        ? {
-                              increment:
-                                  data.hoursLogged
-                          }
-                        : undefined,
-
-                status:
-                    data.progressPercent >
-                    0
-                        ? 'IN_PROGRESS'
-                        : task.status
-            }
-        });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Activity log
-    |--------------------------------------------------------------------------
-    */
-
-    await prisma.activityLog.create({
-        data: {
-            userId:
-                user.id,
-
-            action:
-                'PROGRESS_UPDATE',
-
-            entity:
-                'Task',
-
-            entityId:
-                taskId
-        }
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | History record
-    |--------------------------------------------------------------------------
-    */
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You do not have access to this task');
+    }
 
-    await prisma.taskUpdate.create({
-        data: {
-
-            taskId:
-                taskId,
-
-            userId:
-                user.id,
-
-            progressPercent:
-                data.progressPercent,
-
-            comment:
-                data.comment,
-
-            hoursLogged:
-                data.hoursLogged
-        }
-    });
-
-    return updatedTask;
-};
-
-
-/* =========================================================================
-   GET TASKS
-   ========================================================================= */
-
-export const getTasks = async (
-    user: User,
-    query: any
-) => {
-
-    const page =
-        Number(query.page) ||
-        1;
-
-    const limit =
-        Math.min(
-            Number(query.limit) ||
-                10,
-            100
-        );
-
-    const skip =
-        (page - 1) *
-        limit;
-
-    /*
-    |--------------------------------------------------------------------------
-    | Base organization filter.
-    |--------------------------------------------------------------------------
-    */
-
-    const where: any = {
-        organizationId:
-            user.organizationId,
-
-        deletedAt:
-            null
+    const updates: any = {
+        progressPercent: data.progressPercent
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | Status filter.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        query.status
-    ) {
-        where.status =
-            query.status;
+    if (data.hoursLogged && data.hoursLogged > 0) {
+        updates.actualHours = (task.actualHours || 0) + data.hoursLogged;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | ROLE-BASED VISIBILITY
-    |--------------------------------------------------------------------------
-    |
-    | EMPLOYEE:
-    |   Own tasks.
-    |
-    | TEAM LEAD:
-    |   Tasks in own teams.
-    |
-    | MANAGER:
-    |   Tasks in teams under managed Team Leads.
-    |
-    | ADMIN:
-    |   All organization tasks.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        user.role ===
-        'EMPLOYEE'
-    ) {
-
-        where.assignedToId =
-            user.id;
+    // If task was accepted and work started, advance to IN_PROGRESS
+    if (task.status === 'ACCEPTED' || task.status === 'ASSIGNED') {
+        updates.status = 'IN_PROGRESS';
     }
 
-    else if (
-        user.role ===
-        'TEAM_LEAD'
-    ) {
+    await prisma.task.update({
+        where: { id: taskId },
+        data: updates
+    });
 
-        where.team = {
-            organizationId:
-                user.organizationId,
+    const updateRecord = await prisma.taskUpdate.create({
+        data: {
+            taskId,
+            userId: user.id,
+            progressPercent: data.progressPercent,
+            comment: data.comment || null,
+            hoursLogged: data.hoursLogged || null
+        }
+    });
 
-            teamLeadId:
-                user.id
-        };
+    await prisma.taskHistory.create({
+        data: {
+            taskId,
+            userId: user.id,
+            action: 'PROGRESS_LOGGED',
+            details: `Logged ${data.progressPercent}% progress. ${data.comment || ''}`.trim()
+        }
+    });
+
+    return updateRecord;
+};
+
+/**
+ * Adds a comment to a task.
+ */
+export const addComment = async (user: User, taskId: string, content: string) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
+
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You cannot comment on this task');
     }
 
-    else if (
-        user.role ===
-        'MANAGER'
-    ) {
+    const comment = await prisma.taskComment.create({
+        data: {
+            taskId,
+            userId: user.id,
+            content
+        },
+        include: {
+            user: { select: { id: true, name: true, email: true, role: true } }
+        }
+    });
 
-        where.team = {
-            organizationId:
-                user.organizationId,
+    await prisma.taskHistory.create({
+        data: {
+            taskId,
+            userId: user.id,
+            action: 'COMMENT_ADDED',
+            details: `Comment added by ${user.name}`
+        }
+    });
 
-            teamLead: {
-                managerId:
-                    user.id
-            }
-        };
+    // Notify other task participants
+    await notifyTaskParticipants(
+        taskId,
+        user,
+        'TASK_COMMENT',
+        `${user.name} commented: "${content.length > 60 ? content.slice(0, 57) + '...' : content}"`
+    ).catch(() => {});
+
+    return comment;
+};
+
+/**
+ * Gets comments for a task.
+ */
+export const getComments = async (user: User, taskId: string) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
+
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You cannot view comments for this task');
     }
 
-    else if (
-        user.role ===
-        'ADMIN'
-    ) {
+    return prisma.taskComment.findMany({
+        where: { taskId },
+        include: {
+            user: { select: { id: true, name: true, email: true, role: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+    });
+};
 
-        // Organization filter is enough.
-    }
-
-    else {
-
-        /*
-        | Unknown role = no access.
-        */
-
-        where.id =
-            '__NO_ACCESS__';
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | assignedTo filter
-    |--------------------------------------------------------------------------
-    |
-    | Important:
-    | The role scope above remains active.
-    |
-    | This means a Manager cannot use ?assignedTo=
-    | to access someone outside their hierarchy.
-    |--------------------------------------------------------------------------
-    */
-
-    if (
-        query.assignedTo
-    ) {
-
-        where.assignedToId =
-            query.assignedTo;
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Query database.
-    |--------------------------------------------------------------------------
-    */
-
-    const [
-        tasks,
-        total
-    ] =
-        await Promise.all([
-
-            prisma.task.findMany({
-                where,
-
-                skip,
-
-                take:
-                    limit,
-
+/**
+ * Gets a single task with all relational data.
+ */
+export const getTaskById = async (user: User, taskId: string) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null },
+        include: {
+            assignedTo: { select: { id: true, name: true, email: true, role: true } },
+            assignedManager: { select: { id: true, name: true, email: true } },
+            assignedTeamLead: { select: { id: true, name: true, email: true } },
+            createdBy: { select: { id: true, name: true, email: true, role: true } },
+            department: { select: { id: true, name: true } },
+            team: { select: { id: true, name: true } },
+            subTasks: {
+                where: { deletedAt: null },
                 include: {
-                    assignedTo: {
-                        select: {
-                            id: true,
-                            name: true,
-                            email: true
-                        }
-                    },
-
-                    team: {
-                        select: {
-                            id: true,
-                            name: true,
-
-                            teamLead: {
-                                select: {
-                                    id: true,
-                                    name: true
-                                }
-                            }
-                        }
-                    },
-
-                    createdBy: {
-                        select: {
-                            id: true,
-                            name: true,
-                            role: true
-                        }
-                    }
+                    assignedTo: { select: { id: true, name: true } }
+                }
+            },
+            attachments: true,
+            comments: {
+                include: {
+                    user: { select: { id: true, name: true, role: true } }
                 },
+                orderBy: { createdAt: 'asc' }
+            },
+            history: {
+                include: {
+                    user: { select: { id: true, name: true, role: true } }
+                },
+                orderBy: { createdAt: 'desc' }
+            },
+            assignments: {
+                include: {
+                    user: { select: { id: true, name: true, role: true } }
+                }
+            }
+        }
+    });
 
-                orderBy: [
-                    {
-                        dueDate:
-                            'asc'
-                    },
-                    {
-                        createdAt:
-                            'desc'
-                    }
-                ]
-            }),
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You do not have access to this task');
+    }
 
-            prisma.task.count({
-                where
-            })
-        ]);
-
-    /*
-    |--------------------------------------------------------------------------
-    | Computed overdue status.
-    |--------------------------------------------------------------------------
-    */
-
-    const now =
-        new Date();
-
-    const tasksWithComputed =
-        tasks.map(
-            (task: any) => ({
-
-                ...task,
-
-                isOverdue:
-                    !!task.dueDate &&
-
-                    task.dueDate <
-                        now &&
-
-                    task.status !==
-                        'COMPLETED' &&
-
-                    task.status !==
-                        'CANCELLED'
-            })
-        );
-
-    /*
-    |--------------------------------------------------------------------------
-    | Response
-    |--------------------------------------------------------------------------
-    */
+    const isOverdue = !!(
+        task.dueDate &&
+        new Date(task.dueDate) < new Date() &&
+        task.status !== 'COMPLETED' &&
+        task.status !== 'CANCELLED'
+    );
 
     return {
+        ...task,
+        isOverdue,
+        computedStatus: isOverdue ? 'OVERDUE' : task.status
+    };
+};
 
-        data:
-            tasksWithComputed,
+/**
+ * Delegates / splits a task to a subordinate Team Lead or Employee.
+ */
+export const delegateTask = async (
+    user: User,
+    taskId: string,
+    data: { assignedTeamLeadId?: string; assignedEmployeeId?: string; teamId?: string; notes?: string }
+) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
 
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You do not have access to this task');
+    }
+
+    if (user.role === 'EMPLOYEE') {
+        throw new Error('Employees cannot delegate or reassign tasks');
+    }
+
+    const updates: any = {
+        status: 'ASSIGNED'
+    };
+
+    if (data.assignedEmployeeId) {
+        const authorized = await isAuthorizedForTarget(user, data.assignedEmployeeId);
+        if (!authorized) throw new Error('Target employee is outside your organizational scope');
+        updates.assignedEmployeeId = data.assignedEmployeeId;
+        updates.assignedToId = data.assignedEmployeeId;
+
+        // Record assignment
+        await prisma.taskAssignment.upsert({
+            where: { taskId_userId: { taskId, userId: data.assignedEmployeeId } },
+            create: { taskId, userId: data.assignedEmployeeId, role: 'ASSIGNEE' },
+            update: { assignedAt: new Date() }
+        });
+    }
+
+    if (data.assignedTeamLeadId) {
+        const authorized = await isAuthorizedForTarget(user, data.assignedTeamLeadId);
+        if (!authorized) throw new Error('Target team lead is outside your organizational scope');
+        updates.assignedTeamLeadId = data.assignedTeamLeadId;
+        if (!data.assignedEmployeeId) {
+            updates.assignedToId = data.assignedTeamLeadId;
+        }
+    }
+
+    if (data.teamId) {
+        updates.teamId = data.teamId;
+    }
+
+    const updated = await prisma.task.update({
+        where: { id: taskId },
+        data: updates,
+        include: {
+            assignedTo: { select: { id: true, name: true, role: true } },
+            team: { select: { id: true, name: true } }
+        }
+    });
+
+    await prisma.taskHistory.create({
+        data: {
+            taskId,
+            userId: user.id,
+            action: 'DELEGATED',
+            toStatus: 'ASSIGNED',
+            details: data.notes || `Task delegated to ${updated.assignedTo?.name || 'subordinate'}`
+        }
+    });
+
+    return updated;
+};
+
+/**
+ * Soft-deletes a task.
+ */
+export const deleteTask = async (user: User, taskId: string) => {
+    const task = await prisma.task.findUnique({
+        where: { id: taskId, deletedAt: null }
+    });
+
+    if (!task) throw new Error('Task not found');
+    if (!(await canAccessTask(user, task))) {
+        throw new Error('Forbidden: You cannot delete this task');
+    }
+
+    if (user.role === 'EMPLOYEE') {
+        throw new Error('Employees cannot delete tasks');
+    }
+
+    await prisma.task.update({
+        where: { id: taskId },
+        data: { deletedAt: new Date(), status: 'CANCELLED' }
+    });
+
+    await prisma.taskHistory.create({
+        data: {
+            taskId,
+            userId: user.id,
+            action: 'DELETED',
+            toStatus: 'CANCELLED',
+            details: `Task soft deleted by ${user.name}`
+        }
+    });
+
+    return { success: true };
+};
+
+/**
+ * Lists tasks within the user's organizational scope with pagination and filters.
+ */
+export const getTasks = async (user: User, query: TaskQueryInput) => {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+        organizationId: user.organizationId,
+        deletedAt: null
+    };
+
+    // Role-based scope filtering (Server-Enforced)
+    if (user.role === 'EMPLOYEE') {
+        where.OR = [
+            { assignedToId: user.id },
+            { assignedEmployeeId: user.id }
+        ];
+    } else if (user.role === 'TEAM_LEAD') {
+        where.OR = [
+            { createdById: user.id },
+            { assignedTeamLeadId: user.id },
+            { assignedToId: user.id },
+            { team: { teamLeadId: user.id } },
+            { assignedTo: { teamLeadId: user.id } }
+        ];
+    } else if (user.role === 'MANAGER') {
+        where.OR = [
+            { createdById: user.id },
+            { assignedManagerId: user.id },
+            { assignedToId: user.id },
+            ...(user.departmentId ? [{ departmentId: user.departmentId }] : []),
+            { department: { managerId: user.id } },
+            { team: { teamLead: { managerId: user.id } } }
+        ];
+    }
+
+    // Additional query filters
+    if (query.status) {
+        where.status = normalizeStatus(query.status);
+    }
+
+    if (query.priority) {
+        where.priority = query.priority;
+    }
+
+    if (query.departmentId) {
+        where.departmentId = query.departmentId;
+    }
+
+    if (query.teamId) {
+        where.teamId = query.teamId;
+    }
+
+    if (query.assignedTo || query.assignedEmployeeId) {
+        where.assignedToId = query.assignedTo || query.assignedEmployeeId;
+    }
+
+    if (query.assignedTeamLeadId) {
+        where.assignedTeamLeadId = query.assignedTeamLeadId;
+    }
+
+    if (query.assignedManagerId) {
+        where.assignedManagerId = query.assignedManagerId;
+    }
+
+    if (query.parentTaskId) {
+        where.parentTaskId = query.parentTaskId;
+    }
+
+    if (query.search) {
+        where.AND = [
+            ...(where.AND || []),
+            {
+                OR: [
+                    { title: { contains: query.search, mode: 'insensitive' } },
+                    { description: { contains: query.search, mode: 'insensitive' } }
+                ]
+            }
+        ];
+    }
+
+    const orderBy: any = {};
+    const sortBy = query.sortBy || 'createdAt';
+    const sortOrder = query.sortOrder || 'desc';
+    orderBy[sortBy] = sortOrder;
+
+    const [total, tasks] = await Promise.all([
+        prisma.task.count({ where }),
+        prisma.task.findMany({
+            where,
+            include: {
+                assignedTo: { select: { id: true, name: true, email: true, role: true } },
+                assignedManager: { select: { id: true, name: true } },
+                assignedTeamLead: { select: { id: true, name: true } },
+                createdBy: { select: { id: true, name: true, role: true } },
+                department: { select: { id: true, name: true } },
+                team: { select: { id: true, name: true } }
+            },
+            skip,
+            take: limit,
+            orderBy
+        })
+    ]);
+
+    // Compute dynamic isOverdue flag
+    const now = new Date();
+    const tasksWithComputed = tasks.map((task) => {
+        const isOverdue = !!(
+            task.dueDate &&
+            new Date(task.dueDate) < now &&
+            task.status !== 'COMPLETED' &&
+            task.status !== 'CANCELLED'
+        );
+        return {
+            ...task,
+            isOverdue,
+            computedStatus: isOverdue ? 'OVERDUE' : task.status
+        };
+    });
+
+    return {
+        data: tasksWithComputed,
         meta: {
-
             total,
-
             page,
-
             limit,
-
-            totalPages:
-                Math.ceil(
-                    total /
-                    limit
-                )
+            totalPages: Math.ceil(total / limit)
         }
     };
 };

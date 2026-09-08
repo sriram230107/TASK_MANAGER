@@ -7,51 +7,55 @@ datasource db {
 }
 
 model Organization {
-  id            String         @id @default(uuid())
-  name          String
-  createdAt     DateTime       @default(now())
-  tasks         Task[]
-  taskTemplates TaskTemplate[]
-  teams         Team[]
-  users         User[]
+  id                 String          @id @default(uuid())
+  name               String
+  workingHoursPerDay Float           @default(8.0)
+  workDaysPerWeek    Int             @default(5)
+  settings           Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @default(now()) @updatedAt
+  departments        Department[]
+  teams              Team[]
+  users              User[]
+  tasks              Task[]
+  taskTemplates      TaskTemplate[]
+  goals              Goal[]
+  documents          Document[]
 }
 
-model User {
-  id              String              @id @default(uuid())
-  email           String              @unique
-  passwordHash    String
-  name            String
-  role            Role
-  managerId       String?
-  organizationId  String
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  deletedAt       DateTime?
-  activityLogs    ActivityLog[]
-  notifications   Notification[]
-  reviewsReceived PerformanceReview[] @relation("Reviewee")
-  reviewsGiven    PerformanceReview[] @relation("Reviewer")
-  refreshTokens   RefreshToken[]
-  assignedTasks   Task[]              @relation("TaskAssignee")
-  createdTasks    Task[]              @relation("TaskCreator")
-  taskAttachments TaskAttachment[]
-  taskUpdates     TaskUpdate[]
-  ledTeams        Team[]              @relation("TeamLead")
-  memberships     TeamMember[]
-  manager         User?               @relation("UserManager", fields: [managerId], references: [id])
-  directReports   User[]              @relation("UserManager")
-  organization    Organization        @relation(fields: [organizationId], references: [id])
+model Department {
+  id             String       @id @default(uuid())
+  name           String
+  code           String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  managerId      String?
+  manager        User?        @relation("DepartmentManager", fields: [managerId], references: [id])
+  teams          Team[]
+  users          User[]       @relation("DepartmentUsers")
+  tasks          Task[]
+  goals          Goal[]
+  documents      Document[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, name])
 }
 
 model Team {
   id             String       @id @default(uuid())
   name           String
   organizationId String
-  teamLeadId     String
-  tasks          Task[]
   organization   Organization @relation(fields: [organizationId], references: [id])
-  teamLead       User         @relation("TeamLead", fields: [teamLeadId], references: [id])
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  teamLeadId     String?
+  teamLead       User?        @relation("TeamLead", fields: [teamLeadId], references: [id])
   members        TeamMember[]
+  tasks          Task[]
+  goals          Goal[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
 }
 
 model TeamMember {
@@ -65,36 +69,110 @@ model TeamMember {
   @@unique([teamId, userId])
 }
 
+model User {
+  id                          String              @id @default(uuid())
+  email                       String              @unique
+  passwordHash                String
+  name                        String
+  role                        Role
+  organizationId              String
+  organization                Organization        @relation(fields: [organizationId], references: [id])
+  departmentId                String?
+  department                  Department?         @relation("DepartmentUsers", fields: [departmentId], references: [id])
+  managerId                   String?
+  manager                     User?               @relation("UserManager", fields: [managerId], references: [id])
+  directReports               User[]              @relation("UserManager")
+  teamLeadId                  String?
+  teamLead                    User?               @relation("UserTeamLead", fields: [teamLeadId], references: [id])
+  ledEmployees                User[]              @relation("UserTeamLead")
+  departmentsManaged          Department[]        @relation("DepartmentManager")
+  ledTeams                    Team[]              @relation("TeamLead")
+  memberships                 TeamMember[]
+  createdTasks                Task[]              @relation("TaskCreator")
+  managedTasks                Task[]              @relation("TaskAssignedManager")
+  leadTasks                   Task[]              @relation("TaskAssignedLead")
+  employeeTasks               Task[]              @relation("TaskAssignedEmployee")
+  assignedTasks               Task[]              @relation("TaskAssignee")
+  taskAssignments             TaskAssignment[]
+  taskUpdates                 TaskUpdate[]
+  taskComments                TaskComment[]
+  taskHistories               TaskHistory[]
+  taskAttachments             TaskAttachment[]
+  attendances                 Attendance[]
+  leaveRequests               LeaveRequest[]      @relation("LeaveRequester")
+  leaveRequestsLeadReviewed   LeaveRequest[]      @relation("LeaveLeadReviewer")
+  leaveRequestsManagerReviewed LeaveRequest[]     @relation("LeaveManagerReviewer")
+  leaveBalances               LeaveBalance[]
+  reviewsReceived             PerformanceReview[] @relation("Reviewee")
+  reviewsGiven                PerformanceReview[] @relation("Reviewer")
+  goals                       Goal[]
+  payrollRecords              PayrollRecord[]
+  uploadedDocuments           Document[]
+  auditLogs                   AuditLog[]          @relation("UserAuditLogs")
+  activityLogs                ActivityLog[]       @relation("UserActivityLogs")
+  notifications               Notification[]
+  refreshTokens               RefreshToken[]
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+  deletedAt                   DateTime?
+}
+
 model Task {
-  id              String           @id @default(uuid())
-  title           String
-  description     String?
-  createdById     String
-  assignedToId    String
-  teamId          String
-  parentTaskId    String?
-  status          TaskStatus       @default(NOT_STARTED)
-  priority        TaskPriority     @default(MEDIUM)
-  progressPercent Int              @default(0)
-  estimatedHours  Float?
-  actualHours     Float?           @default(0)
-  startDate       DateTime?
-  dueDate         DateTime?
-  completedAt     DateTime?
-  organizationId  String
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  deletedAt       DateTime?
-  notifications   Notification[]
-  recurrenceRule  RecurrenceRule?
-  assignedTo      User             @relation("TaskAssignee", fields: [assignedToId], references: [id])
-  createdBy       User             @relation("TaskCreator", fields: [createdById], references: [id])
-  organization    Organization     @relation(fields: [organizationId], references: [id])
-  parentTask      Task?            @relation("SubTasks", fields: [parentTaskId], references: [id])
-  subTasks        Task[]           @relation("SubTasks")
-  team            Team             @relation(fields: [teamId], references: [id])
-  attachments     TaskAttachment[]
-  updates         TaskUpdate[]
+  id                  String           @id @default(uuid())
+  title               String
+  description         String?
+  priority            TaskPriority     @default(MEDIUM)
+  status              TaskStatus       @default(DRAFT)
+  createdById         String
+  createdBy           User             @relation("TaskCreator", fields: [createdById], references: [id])
+  assignedManagerId   String?
+  assignedManager     User?            @relation("TaskAssignedManager", fields: [assignedManagerId], references: [id])
+  assignedTeamLeadId  String?
+  assignedTeamLead    User?            @relation("TaskAssignedLead", fields: [assignedTeamLeadId], references: [id])
+  assignedEmployeeId  String?
+  assignedEmployee    User?            @relation("TaskAssignedEmployee", fields: [assignedEmployeeId], references: [id])
+  assignedToId        String?
+  assignedTo          User?            @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  departmentId        String?
+  department          Department?      @relation(fields: [departmentId], references: [id])
+  teamId              String?
+  team                Team?            @relation(fields: [teamId], references: [id])
+  organizationId      String
+  organization        Organization     @relation(fields: [organizationId], references: [id])
+  startDate           DateTime?
+  dueDate             DateTime?
+  completedAt         DateTime?
+  estimatedHours      Float?
+  actualHours         Float?           @default(0)
+  progressPercent     Int              @default(0)
+  parentTaskId        String?
+  parentTask          Task?            @relation("SubTasks", fields: [parentTaskId], references: [id])
+  subTasks            Task[]           @relation("SubTasks")
+  dependencies        String[]         @default([])
+  completionNotes     String?
+  reviewNotes         String?
+  assignments         TaskAssignment[]
+  updates             TaskUpdate[]
+  comments            TaskComment[]
+  attachments         TaskAttachment[]
+  history             TaskHistory[]
+  notifications       Notification[]
+  recurrenceRule      RecurrenceRule?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  deletedAt           DateTime?
+}
+
+model TaskAssignment {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  role       String   @default("ASSIGNEE")
+  assignedAt DateTime @default(now())
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([taskId, userId])
 }
 
 model TaskUpdate {
@@ -105,8 +183,19 @@ model TaskUpdate {
   comment         String?
   hoursLogged     Float?
   createdAt       DateTime @default(now())
-  task            Task     @relation(fields: [taskId], references: [id])
+  task            Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   user            User     @relation(fields: [userId], references: [id])
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  taskId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
 }
 
 model TaskAttachment {
@@ -118,8 +207,21 @@ model TaskAttachment {
   mimeType     String
   sizeBytes    Int
   createdAt    DateTime @default(now())
-  task         Task     @relation(fields: [taskId], references: [id])
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+}
+
+model TaskHistory {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  action     String
+  fromStatus String?
+  toStatus   String?
+  details    String?
+  createdAt  DateTime @default(now())
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
 }
 
 model RecurrenceRule {
@@ -130,18 +232,178 @@ model RecurrenceRule {
   endDate   DateTime?
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt
-  task      Task                @relation(fields: [taskId], references: [id])
+  task      Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model Attendance {
+  id                   String           @id @default(uuid())
+  userId               String
+  date                 DateTime
+  checkIn              DateTime?
+  checkOut             DateTime?
+  breakDurationMinutes Int              @default(0)
+  totalWorkingMinutes  Int              @default(0)
+  overtimeMinutes      Int              @default(0)
+  status               AttendanceStatus @default(PRESENT)
+  lateArrival          Boolean          @default(false)
+  earlyDeparture       Boolean          @default(false)
+  isWorkFromHome       Boolean          @default(false)
+  notes                String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  user                 User             @relation(fields: [userId], references: [id])
+  workSessions         WorkSession[]
+
+  @@unique([userId, date])
+}
+
+model WorkSession {
+  id              String          @id @default(uuid())
+  attendanceId    String
+  type            WorkSessionType @default(WORKING)
+  startTime       DateTime        @default(now())
+  endTime         DateTime?
+  durationMinutes Int?
+  attendance      Attendance      @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+}
+
+model LeaveRequest {
+  id                     String      @id @default(uuid())
+  employeeId             String
+  type                   LeaveType
+  startDate              DateTime
+  endDate                DateTime
+  daysCount              Float
+  reason                 String
+  status                 LeaveStatus @default(PENDING_LEAD)
+  teamLeadReviewerId     String?
+  teamLeadReviewedAt     DateTime?
+  managerReviewerId      String?
+  managerReviewedAt      DateTime?
+  reviewerNotes          String?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  employee               User        @relation("LeaveRequester", fields: [employeeId], references: [id])
+  teamLeadReviewer       User?       @relation("LeaveLeadReviewer", fields: [teamLeadReviewerId], references: [id])
+  managerReviewer        User?       @relation("LeaveManagerReviewer", fields: [managerReviewerId], references: [id])
+}
+
+model LeaveBalance {
+  id            String    @id @default(uuid())
+  userId        String
+  leaveType     LeaveType
+  allocatedDays Float
+  usedDays      Float     @default(0)
+  remainingDays Float
+  year          Int
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, leaveType, year])
+}
+
+model PerformanceReview {
+  id                    String   @id @default(uuid())
+  employeeId            String
+  reviewerId            String
+  taskCompletionRate    Float
+  onTimeRate            Float
+  goalsAchievedRate     Float    @default(0)
+  attendanceConsistency Float    @default(100)
+  rating                Int
+  periodStart           DateTime
+  periodEnd             DateTime
+  cadence               String   @default("QUARTERLY")
+  comments              String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  employee              User     @relation("Reviewee", fields: [employeeId], references: [id])
+  reviewer              User     @relation("Reviewer", fields: [reviewerId], references: [id])
+}
+
+model Goal {
+  id             String       @id @default(uuid())
+  title          String
+  description    String?
+  level          GoalLevel    @default(EMPLOYEE)
+  ownerId        String?
+  departmentId   String?
+  teamId         String?
+  organizationId String
+  target         String
+  deadline       DateTime
+  progress       Int          @default(0)
+  status         GoalStatus   @default(NOT_STARTED)
+  reviewNotes    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  owner          User?        @relation(fields: [ownerId], references: [id])
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  team           Team?        @relation(fields: [teamId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id])
+}
+
+model PayrollRecord {
+  id          String        @id @default(uuid())
+  employeeId  String
+  periodStart DateTime
+  periodEnd   DateTime
+  baseSalary  Float
+  allowances  Float         @default(0)
+  deductions  Float         @default(0)
+  overtimePay Float         @default(0)
+  bonuses     Float         @default(0)
+  netSalary   Float
+  payslipUrl  String?
+  status      PayrollStatus @default(DRAFT)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  employee    User          @relation(fields: [employeeId], references: [id])
+}
+
+model Document {
+  id             String           @id @default(uuid())
+  title          String
+  description    String?
+  fileUrl        String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  category       DocumentCategory @default(OTHER)
+  accessScope    DocumentScope    @default(ORGANIZATION)
+  departmentId   String?
+  uploadedById   String
+  organizationId String
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  department     Department?      @relation(fields: [departmentId], references: [id])
+  uploadedBy     User             @relation(fields: [uploadedById], references: [id])
+  organization   Organization     @relation(fields: [organizationId], references: [id])
 }
 
 model Notification {
-  id     String   @id @default(uuid())
-  userId String
-  taskId String?
-  type   String
-  isRead Boolean  @default(false)
-  sentAt DateTime @default(now())
-  task   Task?    @relation(fields: [taskId], references: [id])
-  user   User     @relation(fields: [userId], references: [id])
+  id        String   @id @default(uuid())
+  userId    String
+  taskId    String?
+  type      String
+  message   String?
+  isRead    Boolean  @default(false)
+  sentAt    DateTime @default(now())
+  task      Task?    @relation(fields: [taskId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+  user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
 }
 
 model ActivityLog {
@@ -151,22 +413,7 @@ model ActivityLog {
   entity    String
   entityId  String
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-}
-
-model PerformanceReview {
-  id                 String   @id @default(uuid())
-  employeeId         String
-  reviewerId         String
-  taskCompletionRate Float
-  onTimeRate         Float
-  rating             Int
-  comments           String?
-  periodStart        DateTime
-  periodEnd          DateTime
-  createdAt          DateTime @default(now())
-  employee           User     @relation("Reviewee", fields: [employeeId], references: [id])
-  reviewer           User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  user      User     @relation("UserActivityLogs", fields: [userId], references: [id])
 }
 
 model TaskTemplate {
@@ -199,13 +446,20 @@ enum Role {
 }
 
 enum TaskStatus {
-  NOT_STARTED
+  DRAFT
+  ASSIGNED
+  ACCEPTED
   IN_PROGRESS
-  BLOCKED
   ON_HOLD
-  PENDING_REVIEW
+  SUBMITTED
+  UNDER_REVIEW
   COMPLETED
+  CHANGES_REQUESTED
   CANCELLED
+  OVERDUE
+  NOT_STARTED
+  BLOCKED
+  PENDING_REVIEW
 }
 
 enum TaskPriority {
@@ -220,4 +474,74 @@ enum RecurrenceFrequency {
   WEEKLY
   MONTHLY
   CUSTOM
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  LEAVE
+  HOLIDAY
+  WORK_FROM_HOME
+}
+
+enum WorkSessionType {
+  WORKING
+  BREAK
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  CASUAL
+  UNPAID
+  MATERNITY
+  PATERNITY
+  BEREAVEMENT
+}
+
+enum LeaveStatus {
+  PENDING_LEAD
+  PENDING_MANAGER
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum GoalLevel {
+  ORGANIZATION
+  DEPARTMENT
+  TEAM
+  EMPLOYEE
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+  MISSED
+  CANCELLED
+}
+
+enum PayrollStatus {
+  DRAFT
+  PROCESSED
+  PAID
+}
+
+enum DocumentCategory {
+  POLICY
+  ANNOUNCEMENT
+  CONTRACT
+  IDENTIFICATION
+  REPORT
+  OTHER
+}
+
+enum DocumentScope {
+  ORGANIZATION
+  DEPARTMENT
+  TEAM
+  CONFIDENTIAL
 }

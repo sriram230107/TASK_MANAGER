@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 
 import * as adminService from '../services/admin.service';
+import * as authService from '../services/auth.service';
 
 import {
     teamSchema,
@@ -8,6 +9,54 @@ import {
     addTeamMemberSchema,
     assignTeamLeadSchema
 } from '../validators/admin.validator';
+import { adminCreateUserSchema } from '../validators/auth.validator';
+
+
+/*
+============================================================
+CREATE USER (ADMIN ONLY)
+============================================================
+*/
+
+export const createUser = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+
+    try {
+
+        const data =
+            adminCreateUserSchema.parse(req.body);
+
+        const user =
+            await authService.createUserByAdmin(
+                (req as any).user,
+                data
+            );
+
+        res.status(201).json({
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role
+            }
+        });
+
+    } catch (error: any) {
+
+        console.error(
+            'Create user error:',
+            error
+        );
+
+        res.status(400).json({
+            message:
+                error?.message ||
+                'Unable to create user'
+        });
+    }
+};
 
 
 /*
@@ -27,7 +76,10 @@ export const createTeam = async (
             teamSchema.parse(req.body);
 
         const team =
-            await adminService.createTeam(data);
+            await adminService.createTeam(
+                (req as any).user,
+                data
+            );
 
         res.status(201).json(team);
 
@@ -67,6 +119,7 @@ export const assignTeamLead = async (
 
         const team =
             await adminService.assignTeamLead(
+                (req as any).user,
                 req.params.id as string,
                 data
             );
@@ -109,6 +162,7 @@ export const addTeamMember = async (
 
         const member =
             await adminService.addTeamMember(
+                (req as any).user,
                 req.params.id as string,
                 data
             );
@@ -151,6 +205,7 @@ export const assignRole = async (
 
         const user =
             await adminService.assignRole(
+                (req as any).user,
                 req.params.id as string,
                 data
             );

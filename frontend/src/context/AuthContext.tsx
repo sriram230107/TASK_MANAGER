@@ -1,11 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { authService, type User } from '../services/auth.service';
 
-export interface User {
-    id: string;
-    email: string;
-    name: string;
-    role: 'ADMIN' | 'MANAGER' | 'TEAM_LEAD' | 'EMPLOYEE';
-}
+export type { User };
 
 interface AuthState {
     user: User | null;
@@ -16,7 +12,8 @@ interface AuthState {
 
 interface AuthContextType extends AuthState {
     login: (user: User, token: string) => void;
-    logout: () => void;
+    logout: () => Promise<void>;
+    refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,11 +26,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading: true
     });
 
+    const refreshUser = async () => {
+        try {
+            const freshUser = await authService.getMe();
+            localStorage.setItem('user', JSON.stringify(freshUser));
+            setState(prev => ({ ...prev, user: freshUser, isAuthenticated: true }));
+        } catch (err) {
+            console.error('Failed to sync user session:', err);
+        }
+    };
+
     useEffect(() => {
         const token = localStorage.getItem('token');
         const userStr = localStorage.getItem('user');
+
         if (token && userStr) {
-            setState({ user: JSON.parse(userStr), token, isAuthenticated: true, isLoading: false });
+            try {
+                const parsedUser = JSON.parse(userStr);
+                setState({ user: parsedUser, token, isAuthenticated: true, isLoading: false });
+                // Refresh asynchronously in background
+                refreshUser();
+            } catch {
+                setState(prev => ({ ...prev, isLoading: false }));
+            }
         } else {
             setState(prev => ({ ...prev, isLoading: false }));
         }
@@ -45,14 +60,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setState({ user, token, isAuthenticated: true, isLoading: false });
     };
 
-    const logout = () => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+    const logout = async () => {
+        try {
+            await authService.logout();
+        } catch {
+            // ignore network errors on logout
+        } finally {
+            setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+        }
     };
 
     return (
-        <AuthContext.Provider value={{ ...state, login, logout }}>
+        <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
             {children}
         </AuthContext.Provider>
     );
