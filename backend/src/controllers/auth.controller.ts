@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
-import { loginSchema, registerSchema } from '../validators/auth.validator';
+import { loginSchema } from '../validators/auth.validator';
 import * as authService from '../services/auth.service';
+import { successResponse, errorResponse } from '../utils/response';
 
 export const login = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -17,19 +18,28 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
-        res.json({ accessToken, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
-    } catch (error: any) {
-        res.status(400).json({ message: error.message });
-    }
-};
+        // Set access token cookie as well to support browser-based file downloads and fallback auth
+        res.cookie('accessToken', accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 15 * 60 * 1000
+        });
 
-export const register = async (req: Request, res: Response): Promise<void> => {
-    try {
-        const data = registerSchema.parse(req.body);
-        const user = await authService.registerUser(data);
-        res.status(201).json({ user: { id: user.id, email: user.email, name: user.name, role: user.role } });
+        successResponse(res, {
+            accessToken,
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                organizationId: user.organizationId,
+                departmentId: user.departmentId
+            }
+        });
     } catch (error: any) {
-        res.status(400).json({ message: error.message });
+        const statusCode = (error.message === 'Invalid credentials' || error.message?.includes('credentials')) ? 401 : 400;
+        errorResponse(res, error.message || 'Login failed', statusCode);
     }
 };
 
@@ -49,14 +59,15 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     } catch (err) { }
 
     res.clearCookie('refreshToken');
-    res.json({ message: 'Logged out successfully' });
+    res.clearCookie('accessToken');
+    successResponse(res, { message: 'Logged out successfully' });
 };
 
 export const refresh = async (req: Request, res: Response): Promise<void> => {
     try {
         const rawToken = req.cookies.refreshToken;
         if (!rawToken) {
-            res.status(401).json({ message: 'Unauthorized' });
+            errorResponse(res, 'Unauthorized: No refresh token provided', 401);
             return;
         }
 
@@ -64,22 +75,29 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
         const record = await prisma.refreshToken.findUnique({ where: { tokenHash } });
 
         if (!record || record.revokedAt || record.expiresAt < new Date()) {
-            res.status(401).json({ message: 'Unauthorized: Invalid or revoked refresh token' });
+            errorResponse(res, 'Unauthorized: Invalid or expired refresh token', 401);
             return;
         }
 
-        const user = await prisma.user.findUnique({ where: { id: record.userId, deletedAt: null } });
+        const user = await prisma.user.findFirst({
+            where: { id: record.userId, deletedAt: null }
+        });
         if (!user) {
-            res.status(401).json({ message: 'Unauthorized: User not found' });
+            errorResponse(res, 'Unauthorized: User not found', 401);
             return;
         }
 
+        // Revoke the old refresh token
         await prisma.refreshToken.update({
             where: { id: record.id },
             data: { revokedAt: new Date() }
         });
 
-        const newAccessToken = jwt.sign({ id: user.id, role: user.role }, process.env.JWT_ACCESS_SECRET as string, { expiresIn: '15m' });
+        const newAccessToken = jwt.sign(
+            { id: user.id, role: user.role, organizationId: user.organizationId },
+            process.env.JWT_ACCESS_SECRET as string,
+            { expiresIn: '15m' }
+        );
 
         const newRawToken = crypto.randomBytes(40).toString('hex');
         const newHash = crypto.createHash('sha256').update(newRawToken).digest('hex');
@@ -96,8 +114,39 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
             maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
-        res.json({ accessToken: newAccessToken });
-    } catch (error) {
-        res.status(401).json({ message: 'Unauthorized: Invalid token payload' });
+        res.cookie('accessToken', newAccessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 15 * 60 * 1000
+        });
+
+        successResponse(res, { accessToken: newAccessToken });
+    } catch (error: any) {
+        errorResponse(res, error.message || 'Unauthorized: Token refresh failed', 401);
+    }
+};
+
+export const getMe = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const user = req.user;
+        if (!user) {
+            errorResponse(res, 'Unauthorized', 401);
+            return;
+        }
+
+        successResponse(res, {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            organizationId: user.organizationId,
+            departmentId: user.departmentId,
+            department: user.department,
+            managerId: user.managerId,
+            teamLeadId: user.teamLeadId
+        });
+    } catch (error: any) {
+        errorResponse(res, error.message || 'Failed to fetch user profile', 500);
     }
 };

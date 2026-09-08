@@ -6,6 +6,17 @@ import { authorize } from '../middleware/rbac.middleware';
 const router = Router();
 router.use(authenticate);
 
-router.post('/reviews', authorize('team', 'update'), performanceController.createReview);
+// Multi-level metrics engine (Employee, Team, Department, Organization)
+router.get('/metrics', authorize('performance', 'read'), performanceController.getMetrics);
+
+// Formal performance evaluations
+router.get('/reviews', authorize('performance', 'read'), performanceController.listReviews);
+router.post('/reviews', authorize('performance', 'create'), performanceController.createReview);
+
+// Cascading goals endpoints
+router.get('/goals', authorize('goals', 'read'), performanceController.listGoals);
+router.post('/goals', authorize('goals', 'create'), performanceController.createGoal);
+router.patch('/goals/:id', authorize('goals', 'update'), performanceController.updateGoal);
+router.delete('/goals/:id', authorize('goals', 'delete'), performanceController.deleteGoal);
 
 export default router;

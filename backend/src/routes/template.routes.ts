@@ -6,7 +6,7 @@ import { authorize } from '../middleware/rbac.middleware';
 const router = Router();
 router.use(authenticate);
 
-router.post('/', authorize('team', 'create'), templateController.createTemplate);
-router.post('/:id/instantiate', authorize('team', 'create'), templateController.instantiateTemplate);
+router.post('/', authorize('template', 'create'), templateController.createTemplate);
+router.post('/:id/instantiate', authorize('template', 'instantiate'), templateController.instantiateTemplate);
 
 export default router;
