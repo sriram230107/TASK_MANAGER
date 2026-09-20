@@ -22,6 +22,7 @@ import payrollRoutes from './routes/payroll.routes';
 import documentRoutes from './routes/document.routes';
 import auditRoutes from './routes/audit.routes';
 import settingsRoutes from './routes/settings.routes';
+import { httpLogger } from './utils/logger';
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+app.use(httpLogger);
 
 // Health checks (used by Docker, load balancers, uptime monitors)
 app.get('/health', (_req, res) => {

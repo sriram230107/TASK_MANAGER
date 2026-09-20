@@ -32,6 +32,15 @@ const schema = z.object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.coerce.number().int().positive().default(3000),
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+    TEST_DATABASE_URL: optionalString,
+    DEFAULT_TIMEZONE: z.string().default('UTC').refine((tz) => {
+        try {
+            new Intl.DateTimeFormat('en', { timeZone: tz });
+            return true;
+        } catch {
+            return false;
+        }
+    }, 'DEFAULT_TIMEZONE must be a valid IANA timezone (e.g. UTC, Asia/Kolkata)'),
 
     // --- Auth -------------------------------------------------------------
     JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 characters'),
