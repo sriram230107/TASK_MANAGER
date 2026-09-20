@@ -55,23 +55,46 @@ Use `npm run bootstrap` instead of `seed:demo` when you want a clean company wit
 > users share the password `password123`. It refuses to run in production or on a database that already
 > has users unless you pass `--force` (`npx tsx prisma/seed.ts --force`).
 
-## Database migrations
+## Database migrations and upgrades
 
-This project was created with `prisma db push`, so it has no `prisma/migrations` folder yet. The Docker
-entrypoint falls back to `db push` until you add one. To switch to versioned migrations (do this once,
-on a machine with internet access):
+This project uses versioned Prisma migrations (`prisma/migrations`).
 
-```bash
-cd backend
-npm run db:baseline                     # writes prisma/migrations/0_init from schema.prisma
-# Only for a database that already exists and already has the tables:
-npx prisma migrate resolve --applied 0_init
-git add prisma/migrations
-git commit -m "Add baseline migration"
-```
+### Upgrading a real database
+Before applying migrations to an existing database:
+1. Verify whether migrations have been tracked:
+   ```sql
+   SELECT to_regclass('public._prisma_migrations');
+   ```
+   If this returns `null`, the database was created using `db push` and has no migration history yet.
+2. Review the migration SQL files in `backend/prisma/migrations/`.
+3. Mark the baseline migration as already applied on your existing database:
+   ```bash
+   cd backend
+   npx prisma migrate resolve --applied 0_init
+   ```
+4. Deploy subsequent migrations safely:
+   ```bash
+   npx prisma migrate deploy
+   ```
 
-From then on, change `schema.prisma`, run `npx prisma migrate dev --name what_changed`, commit the new
-folder, and installations upgrade automatically with `prisma migrate deploy` (done by the Docker entrypoint).
+### Test database setup (`portal_test`)
+Automated tests require a dedicated, isolated test database ending in `_test`:
+1. In PostgreSQL, create the test database:
+   ```sql
+   CREATE DATABASE portal_test;
+   ```
+2. In `backend/.env`, add your test database connection string:
+   ```
+   TEST_DATABASE_URL=postgresql://<user>:<password>@localhost:5432/portal_test
+   ```
+3. Prepare the test schema:
+   ```bash
+   npm --prefix backend run test:db:prepare
+   ```
+4. Run the automated test suite:
+   ```bash
+   npm --prefix backend test
+   ```
 
 ## Configuration
 

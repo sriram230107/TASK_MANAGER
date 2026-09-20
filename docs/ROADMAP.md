@@ -5,7 +5,7 @@ workflow in `.agents/workflows/` (run it by typing `/name` in the agent chat).
 
 | Phase | Workflow | Focus | Size | Status |
 |---|---|---|---|---|
-| 0 | `/phase-0-finish` | Foundation: config, Docker, bootstrap, security basics, migrations, storage adapter, Decimal money, timezone, tests, CI | M | **Partly done** (see below) |
+| 0 | `/phase-0-finish` | Foundation: config, Docker, bootstrap, security basics, migrations, storage adapter, Decimal money, timezone, tests, CI | M | Complete (Stage 1) |
 | 1 | `/phase-1-identity` | Invite onboarding, password reset, lockout, 2FA, SSO, sessions, cookie-only auth, email service | L | Planned |
 | 2 | `/phase-2-design-system` | New UI: design system, theming and branding, real routing, command palette, accessibility, PWA, i18n, 3D | L | Planned |
 | 3 | `/phase-3-task-engine` | Task model v2, Kanban, calendar, timeline, task drawer, recurring, automation, real-time | XL | Planned |
@@ -21,12 +21,17 @@ workflow in `.agents/workflows/` (run it by typing `/name` in the agent chat).
 
 ## Phase 0 status
 
-Done: validated env config, CORS from env, helmet, global and failed-login rate limits, error handler, health
-checks, graceful shutdown, case-insensitive timing-safe sign-in, configurable cookies, bootstrap command, guarded
-demo seed, Dockerfiles, compose with pgvector, runtime frontend config, demo login gating, lazy 3D sign-in scene.
-
-Remaining: baseline migration (`npm run db:baseline`), storage adapter (local and S3) with file-type sniffing,
-money to Decimal, organization timezone, automated tests, CI, structured logging, hide `passwordHash` from `req.user`.
+Complete in Stage 1:
+- Baselined migration `0_init` created with `npm run db:baseline`.
+- Storage adapter (`LocalStorageDriver`) with content-based binary magic bytes inspection (`magic-bytes.ts`) rejecting executables (PE, ELF, Mach-O), and path-traversal guard.
+- Legacy download paths secured inside `UPLOAD_DIR`, sending `Content-Disposition: attachment` for non-images.
+- Organization IANA timezone validation with native `Intl`, UTC code default, Asia/Kolkata backfill script for existing org, and `--timezone` bootstrap flag.
+- Test database isolation harness targeting `portal_test` exclusively via `TEST_DATABASE_URL` with live `SELECT current_database()` verification.
+- 24 Vitest automated integration tests across auth, hierarchy, task status transitions, storage, timezone, and payroll.
+- Synthetic Float to Decimal migration tested on `portal_test` with zero data loss.
+- GitHub Actions CI pipeline (`.github/workflows/ci.yml`).
+- Structured logging with Pino, strict redaction of sensitive credentials, and `pino-http` request tracking.
+- Excluded `passwordHash` from `req.user` in auth middleware and verified with automated test.
 
 ## AI features by phase
 

@@ -14,8 +14,8 @@ Write an implementation plan first, including the **data migration plan**, and w
 1. **Data model (migration and idempotent backfill).**
    - `TaskParticipant` (taskId, userId, role: RESPONSIBLE | CO_EXECUTOR | OBSERVER | CREATOR) replaces `assignedManagerId`, `assignedTeamLeadId`, `assignedEmployeeId`,
      `assignedToId`. Keep old columns until the frontend is switched, then remove in a later migration.
-   - Statuses reduced to about 8: `DRAFT, TODO, IN_PROGRESS, BLOCKED, IN_REVIEW, CHANGES_REQUESTED, DONE, CANCELLED` (overdue is **derived** from the due date, not a status).
-     Provide a mapping table from all 14 old values and a per-organization configurable workflow (stages, order, whether review is required).
+   - Preserve the task lifecycle from `PROJECT_SPEC.md`: `DRAFT, ASSIGNED, ACCEPTED, IN_PROGRESS, ON_HOLD, SUBMITTED, UNDER_REVIEW, COMPLETED, CHANGES_REQUESTED, CANCELLED` (with `OVERDUE` derived automatically from due date, never set manually).
+     Support per-organization configurable workflow (stage display labels, order, and whether review is required).
    - New: `Checklist`, `ChecklistItem`, `TaskDependency` (predecessor, successor, type), `Tag` and `TaskTag`, `TimeEntry` (userId, start, end, note, billable), `SavedView`, `TaskWatcher`.
      Every table carries `organizationId` and useful indexes.
 2. **API.** Cursor pagination, filters (status, assignee, tag, due range, text), sorting, grouping, bulk update, reorder within a stage, dependency validation (no cycles),
