@@ -96,12 +96,14 @@ export const getOrganizationSettings = async (user: SettingsUserContext) => {
         leavePolicies: { ...DEFAULT_ORG_SETTINGS.leavePolicies, ...(currentSettings.leavePolicies || {}) },
         taskPolicies: { ...DEFAULT_ORG_SETTINGS.taskPolicies, ...(currentSettings.taskPolicies || {}) },
         notificationSettings: { ...DEFAULT_ORG_SETTINGS.notificationSettings, ...(currentSettings.notificationSettings || {}) },
-        reviewPeriods: { ...DEFAULT_ORG_SETTINGS.reviewPeriods, ...(currentSettings.reviewPeriods || {}) }
+        reviewPeriods: { ...DEFAULT_ORG_SETTINGS.reviewPeriods, ...(currentSettings.reviewPeriods || {}) },
+        timezone: currentSettings.timezone || (organization as any).timezone || 'UTC'
     };
 
     return {
         id: organization.id,
         name: organization.name,
+        timezone: currentSettings.timezone || (organization as any).timezone || 'UTC',
         workingHoursPerDay: organization.workingHoursPerDay,
         workDaysPerWeek: organization.workDaysPerWeek,
         settings: mergedSettings,
@@ -135,16 +137,22 @@ export const updateOrganizationSettings = async (
     const currentSettings = org.settings ? (org.settings as any) : {};
     const updatedSettings = data.settings
         ? { ...currentSettings, ...data.settings }
-        : currentSettings;
+        : { ...currentSettings };
+
+    if (data.timezone) {
+        updatedSettings.timezone = data.timezone;
+    }
+
+    const updateData: any = {
+        ...(data.name ? { name: data.name } : {}),
+        ...(data.workingHoursPerDay !== undefined ? { workingHoursPerDay: data.workingHoursPerDay } : {}),
+        ...(data.workDaysPerWeek !== undefined ? { workDaysPerWeek: data.workDaysPerWeek } : {}),
+        settings: updatedSettings
+    };
 
     const updated = await prisma.organization.update({
         where: { id: user.organizationId },
-        data: {
-            ...(data.name ? { name: data.name } : {}),
-            ...(data.workingHoursPerDay !== undefined ? { workingHoursPerDay: data.workingHoursPerDay } : {}),
-            ...(data.workDaysPerWeek !== undefined ? { workDaysPerWeek: data.workDaysPerWeek } : {}),
-            settings: updatedSettings
-        }
+        data: updateData
     });
 
     await logAudit({

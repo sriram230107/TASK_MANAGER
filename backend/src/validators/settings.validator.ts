@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidTimezone } from '../utils/timezone';
 
 export const holidayItemSchema = z.object({
     name: z.string().min(1, 'Holiday name is required'),
@@ -8,6 +9,9 @@ export const holidayItemSchema = z.object({
 
 export const updateOrgSettingsSchema = z.object({
     name: z.string().min(2, 'Organization name must be at least 2 characters').max(100).optional(),
+    timezone: z.string().optional().refine((tz) => !tz || isValidTimezone(tz), {
+        message: 'Must be a valid IANA timezone (e.g. UTC, Asia/Kolkata)'
+    }),
     workingHoursPerDay: z.number().min(1).max(24).optional(),
     workDaysPerWeek: z.number().int().min(1).max(7).optional(),
     settings: z.object({

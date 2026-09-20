@@ -16,6 +16,7 @@ import bcrypt from 'bcrypt';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { DEFAULT_ORG_SETTINGS } from '../src/services/settings.service';
+import { isValidTimezone } from '../src/utils/timezone';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
@@ -54,12 +55,15 @@ async function main() {
     let email = arg('email') || process.env.BOOTSTRAP_ADMIN_EMAIL;
     let name = arg('name') || process.env.BOOTSTRAP_ADMIN_NAME;
     let password = arg('password') || process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    let timezone = arg('timezone') || process.env.BOOTSTRAP_TIMEZONE || 'UTC';
 
     if ((!company || !email || !name) && process.stdin.isTTY) {
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
         company = company || (await rl.question('Company name: '));
         name = name || (await rl.question('Admin full name: '));
         email = email || (await rl.question('Admin email: '));
+        const tzInput = await rl.question('Organization timezone [UTC]: ');
+        if (tzInput && tzInput.trim()) timezone = tzInput.trim();
         rl.close();
     }
 
@@ -73,6 +77,10 @@ async function main() {
     }
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
         console.error(`"${email}" is not a valid email address.`);
+        process.exit(1);
+    }
+    if (!isValidTimezone(timezone)) {
+        console.error(`"${timezone}" is not a valid IANA timezone (e.g. UTC, Asia/Kolkata).`);
         process.exit(1);
     }
 
@@ -92,7 +100,7 @@ async function main() {
             data: {
                 name: company!,
                 // Holidays are country-specific, so start empty and let the admin configure them.
-                settings: { ...DEFAULT_ORG_SETTINGS, holidays: [] } as any,
+                settings: { ...DEFAULT_ORG_SETTINGS, timezone, holidays: [] } as any,
             },
         });
         const admin = await tx.user.create({
@@ -104,8 +112,9 @@ async function main() {
     console.log('\n=========================================');
     console.log(' Setup complete');
     console.log('=========================================');
-    console.log(` Company : ${org.name}`);
-    console.log(` Admin   : ${admin.email}`);
+    console.log(` Company  : ${org.name}`);
+    console.log(` Admin    : ${admin.email}`);
+    console.log(` Timezone : ${timezone}`);
     if (generated) {
         console.log(` Password: ${password}`);
         console.log('\n Save this password now - it is not stored anywhere and will not be shown again.');
