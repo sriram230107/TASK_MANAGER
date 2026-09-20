@@ -11,9 +11,11 @@
     "prisma:generate": "prisma generate",
     "db:baseline": "node scripts/create-baseline-migration.mjs",
     "db:deploy": "prisma migrate deploy",
+    "test:db:prepare": "node scripts/prepare-test-db.mjs",
+    "test:migration:decimal": "node scripts/test-decimal-migration.mjs",
     "bootstrap": "tsx prisma/bootstrap.ts",
     "seed:demo": "tsx prisma/seed.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +42,8 @@
     "nodemailer": "^9.0.5",
     "pdfkit": "^0.19.1",
     "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -56,10 +60,14 @@
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.21.0",
+    "@types/pino-http": "^5.8.4",
+    "@types/supertest": "^7.2.1",
     "nodemon": "^3.1.14",
     "prisma": "^7.9.1",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }
