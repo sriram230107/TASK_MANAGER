@@ -4,6 +4,7 @@ import { prisma } from '../utils/prisma';
 import { Role, DocumentScope, DocumentCategory } from '@prisma/client';
 import { CreateDocumentDTO, UpdateDocumentDTO, DocumentQueryParams } from '../validators/document.validator';
 import { logAudit } from './audit.service';
+import { storage } from './storage';
 
 export interface DocumentUserContext {
     id: string;
@@ -17,7 +18,7 @@ export interface DocumentUserContext {
  */
 export const uploadDocument = async (
     user: DocumentUserContext,
-    file: { filename: string; originalname: string; mimetype: string; size: number },
+    file: { filename?: string; fileUrl?: string; originalname: string; mimetype: string; size: number },
     data: CreateDocumentDTO
 ) => {
     // Only ADMIN and MANAGER can publish ORGANIZATION-wide policies or announcements
@@ -44,7 +45,7 @@ export const uploadDocument = async (
         }
     }
 
-    const fileUrl = `/uploads/${file.filename}`;
+    const fileUrl = file.fileUrl || (file.filename ? `/uploads/${file.filename}` : '');
 
     const document = await prisma.document.create({
         data: {
@@ -289,11 +290,13 @@ export const deleteDocument = async (
         throw new Error('FORBIDDEN: You do not have permission to delete this document.');
     }
 
-    // Delete file from disk if path exists
+    // Delete file using storage adapter or disk fallback
     try {
-        const filePath = path.join(process.cwd(), document.fileUrl.replace(/^\//, ''));
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
+        if (document.fileUrl.startsWith('org/')) {
+            await storage.delete(document.fileUrl);
+        } else {
+            const cleanKey = document.fileUrl.replace(/^\/uploads\//, '').replace(/^\//, '');
+            await storage.delete(cleanKey);
         }
     } catch (e) {
         console.warn('Could not delete physical file for document:', documentId, e);

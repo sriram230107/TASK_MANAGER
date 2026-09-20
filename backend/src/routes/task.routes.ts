@@ -15,34 +15,9 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-
 const upload = multer({
-    storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = [
-            'application/pdf',
-            'image/jpeg',
-            'image/png',
-            'text/plain',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        ];
-        if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Invalid file type: expected document or image. Executables blocked.'));
-        }
-    }
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 router.get('/', authorize('task', 'read'), taskController.listTasks);
@@ -54,6 +29,7 @@ router.post('/:id/delegate', authorize('task', 'assign'), taskController.delegat
 router.post('/:id/comments', authorize('task', 'read'), taskController.addComment);
 router.get('/:id/comments', authorize('task', 'read'), taskController.getComments);
 router.post('/:id/attachments', authorize('task', 'update'), upload.single('file'), taskController.uploadAttachment);
+router.get('/:id/attachments/:attachmentId/download', authorize('task', 'read'), taskController.downloadAttachment);
 router.get('/:id', authorize('task', 'read'), taskController.getById);
 router.put('/:id', authorize('task', 'update'), taskController.update);
 router.patch('/:id', authorize('task', 'update'), taskController.update);

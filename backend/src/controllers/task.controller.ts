@@ -11,6 +11,9 @@ import {
 import * as taskService from '../services/task.service';
 import { prisma } from '../utils/prisma';
 import { successResponse, errorResponse } from '../utils/response';
+import fs from 'node:fs';
+import path from 'node:path';
+import { storage, buildStorageKey, sniffFileContent, isImageMime } from '../services/storage';
 
 export const create = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -179,7 +182,7 @@ export const deleteTask = async (req: Request, res: Response): Promise<void> => 
 
 export const uploadAttachment = async (req: Request, res: Response): Promise<void> => {
     try {
-        if (!req.file) {
+        if (!req.file || !req.file.buffer) {
             errorResponse(res, 'No file uploaded', 400);
             return;
         }
@@ -205,15 +208,22 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
             return;
         }
 
-        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        const sniff = sniffFileContent(req.file.buffer, req.file.originalname);
+        if (!sniff.isAllowed || sniff.isExecutable) {
+            errorResponse(res, 'Invalid file type: expected document or image. Executables are strictly blocked.', 400);
+            return;
+        }
+
+        const fileKey = buildStorageKey(user.organizationId, req.file.originalname);
+        await storage.save(fileKey, req.file.buffer, sniff.mimeType);
 
         const attachment = await prisma.taskAttachment.create({
             data: {
                 taskId: task.id,
                 uploadedById: user.id,
-                fileUrl,
+                fileUrl: fileKey,
                 fileName: req.file.originalname,
-                mimeType: req.file.mimetype,
+                mimeType: sniff.mimeType,
                 sizeBytes: req.file.size
             }
         });
@@ -230,5 +240,68 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
         successResponse(res, attachment, 201);
     } catch (error: any) {
         errorResponse(res, error.message || 'Failed to upload attachment', 400);
+    }
+};
+
+export const downloadAttachment = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const user = req.user;
+        if (!user) {
+            errorResponse(res, 'Unauthorized', 401);
+            return;
+        }
+
+        const task = await prisma.task.findUnique({
+            where: { id: req.params.id as string, deletedAt: null }
+        });
+
+        if (!task) {
+            errorResponse(res, 'Task not found', 404);
+            return;
+        }
+
+        const canAccess = await taskService.canAccessTask(user, task);
+        if (!canAccess) {
+            errorResponse(res, 'Forbidden: You cannot access attachments for this task', 403);
+            return;
+        }
+
+        const attachment = await prisma.taskAttachment.findFirst({
+            where: { id: req.params.attachmentId as string, taskId: task.id }
+        });
+
+        if (!attachment) {
+            errorResponse(res, 'Attachment not found', 404);
+            return;
+        }
+
+        const isImage = isImageMime(attachment.mimeType);
+        res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `${isImage ? 'inline' : 'attachment'}; filename="${encodeURIComponent(attachment.fileName)}"`);
+
+        if (attachment.fileUrl.startsWith('org/')) {
+            const stream = await storage.getStream(attachment.fileUrl);
+            stream.pipe(res);
+            return;
+        }
+
+        // Legacy attachment path handling: resolve safely within UPLOAD_DIR
+        const clean = attachment.fileUrl.replace(/.*\/uploads\//, '').replace(/^\//, '');
+        const uploadBase = path.resolve(process.cwd(), 'uploads');
+        const targetPath = path.resolve(uploadBase, clean);
+
+        if (!targetPath.startsWith(uploadBase + path.sep) && targetPath !== uploadBase) {
+            errorResponse(res, 'Access denied: Path traversal detected', 400);
+            return;
+        }
+
+        if (!fs.existsSync(targetPath)) {
+            errorResponse(res, 'Attachment file not found on disk', 404);
+            return;
+        }
+
+        fs.createReadStream(targetPath).pipe(res);
+    } catch (error: any) {
+        errorResponse(res, error.message || 'Failed to download attachment', 500);
     }
 };

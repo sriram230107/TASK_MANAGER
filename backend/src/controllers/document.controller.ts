@@ -4,6 +4,7 @@ import fs from 'fs';
 import * as documentService from '../services/document.service';
 import { createDocumentSchema, documentQuerySchema } from '../validators/document.validator';
 import { successResponse, errorResponse } from '../utils/response';
+import { storage, buildStorageKey, sniffFileContent, isImageMime } from '../services/storage';
 
 /**
  * Upload a document
@@ -16,8 +17,14 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
             return;
         }
 
-        if (!req.file) {
+        if (!req.file || !req.file.buffer) {
             errorResponse(res, 'File is required', 400);
+            return;
+        }
+
+        const sniff = sniffFileContent(req.file.buffer, req.file.originalname);
+        if (!sniff.isAllowed || sniff.isExecutable) {
+            errorResponse(res, 'Invalid file type: expected document, spreadsheet, or image. Executables are strictly blocked.', 400);
             return;
         }
 
@@ -27,6 +34,9 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
             return;
         }
 
+        const fileKey = buildStorageKey(user.organizationId, req.file.originalname);
+        await storage.save(fileKey, req.file.buffer, sniff.mimeType);
+
         const document = await documentService.uploadDocument(
             {
                 id: user.id,
@@ -35,9 +45,9 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
                 departmentId: user.departmentId
             },
             {
-                filename: req.file.filename,
+                fileUrl: fileKey,
                 originalname: req.file.originalname,
-                mimetype: req.file.mimetype,
+                mimetype: sniff.mimeType,
                 size: req.file.size
             },
             parseResult.data
@@ -230,15 +240,32 @@ export const downloadDocument = async (req: Request, res: Response): Promise<voi
             return;
         }
 
-        const filename = path.basename(document.fileUrl);
-        const filePath = path.join(process.cwd(), 'uploads', filename);
+        const isImage = isImageMime(document.mimeType);
+        res.setHeader('Content-Type', document.mimeType || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `${isImage ? 'inline' : 'attachment'}; filename="${encodeURIComponent(document.fileName)}"`);
 
-        if (!fs.existsSync(filePath)) {
+        if (document.fileUrl.startsWith('org/')) {
+            const stream = await storage.getStream(document.fileUrl);
+            stream.pipe(res);
+            return;
+        }
+
+        // Legacy storage path: resolve safely inside UPLOAD_DIR
+        const clean = document.fileUrl.replace(/^\/uploads\//, '').replace(/^\//, '');
+        const uploadBase = path.resolve(process.cwd(), 'uploads');
+        const targetPath = path.resolve(uploadBase, clean);
+
+        if (!targetPath.startsWith(uploadBase + path.sep) && targetPath !== uploadBase) {
+            errorResponse(res, 'Access denied: Path traversal detected', 400);
+            return;
+        }
+
+        if (!fs.existsSync(targetPath)) {
             errorResponse(res, 'Document file not found on disk', 404);
             return;
         }
 
-        res.download(filePath, document.fileName);
+        fs.createReadStream(targetPath).pipe(res);
     } catch (err: any) {
         if (err.message?.startsWith('FORBIDDEN')) {
             errorResponse(res, err.message, 403);
