@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
 import { errorResponse } from '../utils/response';
+import { config } from '../config/env';
 
 export interface TokenPayload {
     id: string;
@@ -33,7 +34,7 @@ export const authenticate = async (
             return;
         }
 
-        const secret = process.env.JWT_ACCESS_SECRET as string;
+        const secret = config.JWT_ACCESS_SECRET;
         let decoded: TokenPayload;
 
         try {
@@ -57,7 +58,18 @@ export const authenticate = async (
                 id: decoded.id,
                 deletedAt: null
             },
-            include: {
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                organizationId: true,
+                departmentId: true,
+                managerId: true,
+                teamLeadId: true,
+                createdAt: true,
+                updatedAt: true,
+                deletedAt: true,
                 department: {
                     select: {
                         id: true,
@@ -79,7 +91,7 @@ export const authenticate = async (
             return;
         }
 
-        req.user = user;
+        req.user = user as any;
         next();
     } catch (error: any) {
         console.error('Authentication middleware error:', error);

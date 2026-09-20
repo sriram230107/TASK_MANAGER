@@ -1,12 +1,14 @@
 import { User as PrismaUser } from '@prisma/client';
 
+export type SafeUser = PrismaUser & {
+  department?: any;
+  organization?: any;
+};
+
 declare global {
   namespace Express {
     interface Request {
-      user?: PrismaUser & {
-        department?: any;
-        organization?: any;
-      };
+      user?: SafeUser;
       scope?: {
         organizationId: string;
         userWhere: any;
