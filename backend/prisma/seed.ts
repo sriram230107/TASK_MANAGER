@@ -26,6 +26,19 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
+    // Safety guard: this script WIPES every table before inserting demo data.
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_DESTRUCTIVE_SEED !== "true") {
+        console.error("Refusing to run: this demo seed deletes ALL data and must not run in production.");
+        console.error("For a real installation use:  npm run bootstrap");
+        process.exit(1);
+    }
+    const existingUsers = await prisma.user.count();
+    if (existingUsers > 0 && !process.argv.includes("--force")) {
+        console.error(`Refusing to run: the database already has ${existingUsers} user(s) and this script would delete them.`);
+        console.error("If you really want to wipe everything and load demo data:  npx tsx prisma/seed.ts --force");
+        process.exit(1);
+    }
+
     console.log("=================================================");
     console.log("🌱 SEEDING COMPLETE MULTI-TIER WORKFORCE PLATFORM");
     console.log("=================================================");

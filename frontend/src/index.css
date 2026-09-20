@@ -32,9 +32,24 @@ body {
   align-items: center;
   height: 100vh;
   padding: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.auth-scene canvas {
+  display: block;
 }
 
 .auth-card {
+  position: relative;
+  z-index: 1;
   background: var(--bg-secondary);
   padding: 3rem;
   border-radius: 12px;

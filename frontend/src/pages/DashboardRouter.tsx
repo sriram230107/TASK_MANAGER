@@ -16,6 +16,7 @@ import { DocumentManagement } from '../components/DocumentManagement';
 import { AuditLogViewer } from '../components/AuditLogViewer';
 import { OrganizationSettings } from '../components/OrganizationSettings';
 import { TaskManagementPanel } from '../components/TaskManagementPanel';
+import { config } from '../config';
 
 type NavView = 'dashboard' | 'employees' | 'tasks' | 'attendance' | 'leave' | 'performance' | 'reports' | 'notifications' | 'payroll' | 'documents' | 'audit' | 'settings';
 
@@ -125,14 +126,14 @@ export const DashboardRouter: React.FC = () => {
                         fontWeight: 700,
                         color: '#fff'
                     }}>
-                        T
+                        {config.APP_NAME.charAt(0).toUpperCase()}
                     </div>
                     <div>
                         <h2 style={{ fontSize: '1rem', margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>
-                            TaskBot Pro
+                            {config.APP_NAME}
                         </h2>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                            Workforce Platform
+                            {config.APP_TAGLINE}
                         </span>
                     </div>
                 </div>

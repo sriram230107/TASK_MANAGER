@@ -1,36 +1,34 @@
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
+import { signAccessToken, createRefreshToken } from '../utils/tokens';
 import { z } from 'zod';
 import { loginSchema, adminCreateUserSchema } from '../validators/auth.validator';
 
+// Compared against when the email is unknown, so response time does not reveal
+// which email addresses exist.
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
+
 export const loginUser = async (data: z.infer<typeof loginSchema>) => {
-    const user = await prisma.user.findFirst({ where: { email: data.email, deletedAt: null } });
-    if (!user) throw new Error('Invalid credentials');
-
-    const isValid = await bcrypt.compare(data.password, user.passwordHash);
-    if (!isValid) throw new Error('Invalid credentials');
-
-    const accessToken = jwt.sign(
-        { id: user.id, role: user.role, organizationId: user.organizationId },
-        process.env.JWT_ACCESS_SECRET as string,
-        { expiresIn: '15m' }
-    );
-
-    const rawToken = crypto.randomBytes(40).toString('hex');
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    await prisma.refreshToken.create({
-        data: { userId: user.id, tokenHash, expiresAt }
+    // Case-insensitive so accounts created with mixed-case emails keep working.
+    const user = await prisma.user.findFirst({
+        where: { email: { equals: data.email, mode: 'insensitive' }, deletedAt: null }
     });
 
-    return { user, accessToken, refreshToken: rawToken };
+    const isValid = await bcrypt.compare(data.password, user?.passwordHash ?? DUMMY_HASH);
+    if (!user || !isValid) throw new Error('Invalid credentials');
+
+    const accessToken = signAccessToken(user);
+    const refresh = createRefreshToken();
+
+    await prisma.refreshToken.create({
+        data: { userId: user.id, tokenHash: refresh.hash, expiresAt: refresh.expiresAt }
+    });
+
+    return { user, accessToken, refreshToken: refresh.raw };
 };
 
 export const createUserByAdmin = async (admin: any, data: z.infer<typeof adminCreateUserSchema>) => {
-    const existing = await prisma.user.findUnique({ where: { email: data.email } });
+    const existing = await prisma.user.findFirst({ where: { email: { equals: data.email, mode: 'insensitive' } } });
     if (existing) throw new Error('Email already in use');
 
     // Rule 6: The new user must belong to the authenticated admin's organization

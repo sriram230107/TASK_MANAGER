@@ -379,8 +379,8 @@ export const createUser = async (adminUser: any, data: CreateUserDTO) => {
         throw new Error('Forbidden: Only administrators can create new users');
     }
 
-    const existing = await prisma.user.findUnique({
-        where: { email: data.email }
+    const existing = await prisma.user.findFirst({
+        where: { email: { equals: data.email, mode: 'insensitive' } }
     });
     if (existing) {
         throw new Error('Email is already in use');

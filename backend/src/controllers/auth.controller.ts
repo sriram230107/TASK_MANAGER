@@ -1,30 +1,19 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
+import { ZodError } from 'zod';
 import { prisma } from '../utils/prisma';
 import { loginSchema } from '../validators/auth.validator';
 import * as authService from '../services/auth.service';
 import { successResponse, errorResponse } from '../utils/response';
+import { setAuthCookies, clearAuthCookies } from '../utils/cookies';
+import { signAccessToken, createRefreshToken, hashToken } from '../utils/tokens';
 
 export const login = async (req: Request, res: Response): Promise<void> => {
     try {
         const data = loginSchema.parse(req.body);
         const { user, accessToken, refreshToken } = await authService.loginUser(data);
 
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-
-        // Set access token cookie as well to support browser-based file downloads and fallback auth
-        res.cookie('accessToken', accessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 15 * 60 * 1000
-        });
+        // The access token cookie also supports browser-based file downloads.
+        setAuthCookies(res, accessToken, refreshToken);
 
         successResponse(res, {
             accessToken,
@@ -38,8 +27,17 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             }
         });
     } catch (error: any) {
-        const statusCode = (error.message === 'Invalid credentials' || error.message?.includes('credentials')) ? 401 : 400;
-        errorResponse(res, error.message || 'Login failed', statusCode);
+        if (error instanceof ZodError) {
+            errorResponse(res, 'Please enter a valid email address and password', 400);
+            return;
+        }
+        if (error?.message === 'Invalid credentials') {
+            errorResponse(res, 'Invalid credentials', 401);
+            return;
+        }
+        // Anything else is unexpected: log it, but never expose internals to the client.
+        console.error('Login error:', error);
+        errorResponse(res, 'Login failed. Please try again.', 500);
     }
 };
 
@@ -47,8 +45,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     try {
         const rawToken = req.cookies.refreshToken;
         if (rawToken) {
-            const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-            const record = await prisma.refreshToken.findUnique({ where: { tokenHash } });
+            const record = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
             if (record && !record.revokedAt) {
                 await prisma.refreshToken.update({
                     where: { id: record.id },
@@ -58,8 +55,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
         }
     } catch (err) { }
 
-    res.clearCookie('refreshToken');
-    res.clearCookie('accessToken');
+    clearAuthCookies(res);
     successResponse(res, { message: 'Logged out successfully' });
 };
 
@@ -71,8 +67,7 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-        const record = await prisma.refreshToken.findUnique({ where: { tokenHash } });
+        const record = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
 
         if (!record || record.revokedAt || record.expiresAt < new Date()) {
             errorResponse(res, 'Unauthorized: Invalid or expired refresh token', 401);
@@ -87,39 +82,20 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Revoke the old refresh token
+        // Rotate: revoke the old refresh token and issue a new pair.
         await prisma.refreshToken.update({
             where: { id: record.id },
             data: { revokedAt: new Date() }
         });
 
-        const newAccessToken = jwt.sign(
-            { id: user.id, role: user.role, organizationId: user.organizationId },
-            process.env.JWT_ACCESS_SECRET as string,
-            { expiresIn: '15m' }
-        );
-
-        const newRawToken = crypto.randomBytes(40).toString('hex');
-        const newHash = crypto.createHash('sha256').update(newRawToken).digest('hex');
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const newAccessToken = signAccessToken(user);
+        const next = createRefreshToken();
 
         await prisma.refreshToken.create({
-            data: { userId: user.id, tokenHash: newHash, expiresAt }
+            data: { userId: user.id, tokenHash: next.hash, expiresAt: next.expiresAt }
         });
 
-        res.cookie('refreshToken', newRawToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        });
-
-        res.cookie('accessToken', newAccessToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 15 * 60 * 1000
-        });
+        setAuthCookies(res, newAccessToken, next.raw);
 
         successResponse(res, { accessToken: newAccessToken });
     } catch (error: any) {

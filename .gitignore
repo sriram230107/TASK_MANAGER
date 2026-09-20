@@ -1,0 +1,23 @@
+# Secrets and local config
+.env
+.env.local
+*.pem
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+
+# Runtime data
+backend/uploads/*
+!backend/uploads/.gitkeep
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Archives (never commit)
+*.zip
