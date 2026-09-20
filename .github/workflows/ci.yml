@@ -1,0 +1,90 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - master
+      - 'stage-*'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  backend:
+    name: Backend (Typecheck, Build, Test)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: portal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
+      - name: Generate Prisma client
+        run: npm --prefix backend run prisma:generate
+
+      - name: Backend Typecheck
+        run: npm --prefix backend run typecheck
+
+      - name: Backend Build
+        run: npm --prefix backend run build
+
+      - name: Prepare test database
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/portal_test
+        run: npm --prefix backend run test:db:prepare
+
+      - name: Run Backend Tests
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/portal_test
+          JWT_ACCESS_SECRET: ci_jwt_access_secret_min_32_chars_long_12345
+          JWT_REFRESH_SECRET: ci_jwt_refresh_secret_min_32_chars_long_12345
+          NODE_ENV: test
+        run: npm --prefix backend run test
+
+  frontend:
+    name: Frontend (Lint & Build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Frontend Lint
+        run: npm --prefix frontend run lint
+
+      - name: Frontend Build
+        run: npm --prefix frontend run build
