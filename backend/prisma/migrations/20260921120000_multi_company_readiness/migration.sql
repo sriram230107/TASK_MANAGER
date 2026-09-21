@@ -121,8 +121,18 @@ SET "organizationId" = u."organizationId"
 FROM "User" u
 WHERE rt."userId" = u.id AND rt."organizationId" IS NULL;
 
--- Step 4: Automated Rollback Guard (DO block)
--- If ANY organizationId is still NULL (e.g. dangling orphan row), raise exception and roll back transaction.
+-- Step 4: Halt on AuditLog rows with no user (never assign or guess)
+DO $$
+DECLARE
+    null_user_audit integer;
+BEGIN
+    SELECT count(*) INTO null_user_audit FROM "AuditLog" WHERE "userId" IS NULL;
+    IF null_user_audit > 0 THEN
+        RAISE EXCEPTION 'MIGRATION HALTED: AuditLog has % row(s) with NULL userId. The migration never assigns or guesses organizationId for these rows. Reassign them yourself with backend/scripts/backfill-organization-id.ts --system-org-id <uuid> --confirm-count <n> before migrate deploy. Transaction rolling back.', null_user_audit;
+    END IF;
+END $$;
+
+-- Step 5: If ANY organizationId is still NULL (dangling parent), raise and roll back
 DO $$
 DECLARE
     orphan_count integer;
@@ -147,7 +157,7 @@ BEGIN
     END IF;
 END $$;
 
--- Step 5: Enforce NOT NULL, foreign keys (ON DELETE RESTRICT), and indexes
+-- Step 6: Enforce NOT NULL, foreign keys (ON DELETE RESTRICT), and indexes
 ALTER TABLE "TeamMember" ALTER COLUMN "organizationId" SET NOT NULL;
 ALTER TABLE "TeamMember" ADD CONSTRAINT "TeamMember_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX "TeamMember_organizationId_idx" ON "TeamMember"("organizationId");
@@ -216,7 +226,7 @@ ALTER TABLE "RefreshToken" ALTER COLUMN "organizationId" SET NOT NULL;
 ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX "RefreshToken_organizationId_idx" ON "RefreshToken"("organizationId");
 
--- Step 6: Email uniqueness migration
+-- Step 7: Email uniqueness migration
 DROP INDEX IF EXISTS "User_email_key";
 
 -- Lowercase existing emails

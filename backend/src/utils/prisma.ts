@@ -8,6 +8,7 @@ export {
     prisma,
     withTenant,
     withoutTenant,
+    continueRequestInTenant,
     getTenantContext,
     tenantStorage,
     type TenantContext

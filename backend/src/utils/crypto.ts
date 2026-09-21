@@ -4,27 +4,22 @@ import { config } from '../config/env';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12; // 96-bit IV for GCM
 const AUTH_TAG_LENGTH = 16; // 128-bit auth tag
+const TEST_KEY_HEX = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 const getEncryptionKey = (): Buffer => {
-    // In test environment, provide a deterministic test-only key if not supplied
     if (config.NODE_ENV === 'test') {
-        const testKey = config.ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-        return Buffer.from(testKey.padEnd(64, '0').slice(0, 64), 'hex');
+        const testKey = config.ENCRYPTION_KEY || TEST_KEY_HEX;
+        return Buffer.from(testKey, 'hex');
     }
 
     if (!config.ENCRYPTION_KEY) {
         throw new Error(
-            'Configuration error: ENCRYPTION_KEY is not set in environment or .env. ' +
-            'Generate a 32-byte hex key to store or decrypt organization secrets.'
+            'Configuration error: ENCRYPTION_KEY is not set. ' +
+            'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
         );
     }
 
-    // Key can be 64-char hex string (32 bytes) or 32-char string
-    if (config.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(config.ENCRYPTION_KEY)) {
-        return Buffer.from(config.ENCRYPTION_KEY, 'hex');
-    }
-
-    return crypto.createHash('sha256').update(config.ENCRYPTION_KEY).digest();
+    return Buffer.from(config.ENCRYPTION_KEY, 'hex');
 };
 
 /**

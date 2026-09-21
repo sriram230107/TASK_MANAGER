@@ -2,7 +2,6 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StorageDriver } from './storage.interface';
 import { LocalStorageDriver } from './local.driver';
-import { sniffFileContent, SniffResult } from './magic-bytes';
 
 export * from './storage.interface';
 export * from './local.driver';

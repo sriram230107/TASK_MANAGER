@@ -139,6 +139,8 @@ model User {
 
   @@unique([organizationId, email])
   @@index([organizationId])
+  // SQL-only unique index User_organizationId_lower_email_idx on (organizationId, LOWER(email))
+  // is created in 20260921120000_multi_company_readiness. Do not drop it; Prisma cannot model expression indexes.
 }
 
 model Task {

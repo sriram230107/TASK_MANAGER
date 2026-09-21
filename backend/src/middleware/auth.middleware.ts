@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma, withTenant, withoutTenant } from '../utils/prisma';
+import { prisma, continueRequestInTenant, withoutTenant } from '../utils/prisma';
 import { errorResponse } from '../utils/response';
 import { config } from '../config/env';
 
@@ -96,9 +96,7 @@ export const authenticate = async (
 
         req.user = user as any;
         req.organizationId = user.organizationId;
-        withTenant(user.organizationId, () => {
-            next();
-        });
+        continueRequestInTenant(user.organizationId, next);
     } catch (error: any) {
         console.error('Authentication middleware error:', error);
         errorResponse(res, 'Internal authentication error', 500);

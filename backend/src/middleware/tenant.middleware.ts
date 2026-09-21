@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/env';
-import { withTenant, withoutTenant, getTenantContext } from '../utils/prisma';
+import { continueRequestInTenant, withoutTenant, getTenantContext } from '../utils/prisma';
 import { errorResponse } from '../utils/response';
 
 let cachedSingleOrgId: string | null = null;
@@ -57,9 +57,7 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
             }
 
             req.organizationId = orgId;
-            withTenant(orgId, () => {
-                next();
-            });
+            continueRequestInTenant(orgId, next);
             return;
         } catch (err: any) {
             console.error('Tenant resolution error (single-company):', err);
@@ -72,9 +70,7 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
     // A. Post-authentication: strictly derive from req.user
     if (req.user?.organizationId) {
         req.organizationId = req.user.organizationId;
-        withTenant(req.user.organizationId, () => {
-            next();
-        });
+        continueRequestInTenant(req.user.organizationId, next);
         return;
     }
 
@@ -101,9 +97,7 @@ export const tenantMiddleware = async (req: Request, res: Response, next: NextFu
             );
             if (orgs.length === 1) {
                 req.organizationId = orgs[0].id;
-                withTenant(orgs[0].id, () => {
-                    next();
-                });
+                continueRequestInTenant(orgs[0].id, next);
                 return;
             }
         } catch {}

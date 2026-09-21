@@ -12,7 +12,9 @@
     "db:baseline": "node scripts/create-baseline-migration.mjs",
     "db:deploy": "prisma migrate deploy",
     "test:db:prepare": "node scripts/prepare-test-db.mjs",
+    "test:db:migrations": "node scripts/inspect-test-migrations.mjs",
     "test:migration:decimal": "node scripts/test-decimal-migration.mjs",
+    "test:migration:multi-company": "node scripts/test-multi-company-migration.mjs",
     "bootstrap": "tsx prisma/bootstrap.ts",
     "seed:demo": "tsx prisma/seed.ts",
     "test": "vitest run"

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, createTestOrg, createTestUser, generateTestTokens } from './helpers/test-app';
 import { cleanDatabase } from './setup';
-import { prisma, withTenant, withoutTenant, getTenantContext } from '../utils/prisma';
+import { prisma, withTenant, withoutTenant } from '../utils/prisma';
 import { Role } from '@prisma/client';
 import { endBreak, checkIn, startBreak } from '../services/attendance.service';
 import { reviewLeaveRequest } from '../services/leave.service';
@@ -157,6 +157,26 @@ describe('Stage 2: Comprehensive Multi-Company Tenant Isolation Suite', () => {
                 dependencies: [taskB.id]
             });
         expect([400, 403]).toContain(depRes.status);
+
+        // 3e. Reject cross-tenant teamId
+        let teamB: any;
+        await withTenant(orgB.id, async () => {
+            teamB = await prisma.team.create({
+                data: {
+                    name: 'Beta Team',
+                    organizationId: orgB.id,
+                    teamLeadId: empB.id
+                }
+            });
+        });
+        const teamRes = await request(app)
+            .post('/api/v1/tasks')
+            .set('Authorization', `Bearer ${tokensA.accessToken}`)
+            .send({
+                title: 'Task with Bad Team',
+                teamId: teamB.id
+            });
+        expect([400, 403]).toContain(teamRes.status);
     });
 
     it('4. Read & Mutation Isolation: prevents Org A users from reading or mutating Org B data', async () => {
@@ -481,12 +501,64 @@ describe('Stage 2: Comprehensive Multi-Company Tenant Isolation Suite', () => {
 
             const content = fs.readFileSync(file, 'utf8');
 
-            // Check for new PrismaClient() instantiations
             if (/new\s+PrismaClient\s*\(/.test(content)) {
                 violations.push(`${relPath}: Direct new PrismaClient() instantiation found!`);
+            }
+
+            if (/\brawPrisma\b/.test(content) && !relPath.endsWith('utils/tenant.prisma.ts')) {
+                violations.push(`${relPath}: Import or use of unscoped rawPrisma is forbidden outside the tenant module.`);
+            }
+
+            const valueImports = [...content.matchAll(/import\s+(?!type\b)([^;]+)\s+from\s+['"]@prisma\/client['"]/g)];
+            for (const match of valueImports) {
+                const clause = match[1];
+                const stripped = clause.replace(/\btype\s+/g, '');
+                if (/\bPrismaClient\b/.test(stripped)) {
+                    violations.push(`${relPath}: Value import of PrismaClient from @prisma/client is forbidden outside the tenant module.`);
+                }
             }
         }
 
         expect(violations).toEqual([]);
+    });
+
+    it('9. AsyncLocalStorage tenant context does not bleed across interleaved requests', async () => {
+        const orgA = await createTestOrg('ALS Alpha');
+        const orgB = await createTestOrg('ALS Beta');
+        const adminA = await createTestUser({ orgId: orgA.id, role: Role.ADMIN, email: 'als.a@alpha.com' });
+        const adminB = await createTestUser({ orgId: orgB.id, role: Role.ADMIN, email: 'als.b@beta.com' });
+        const tokensA = generateTestTokens(adminA);
+        const tokensB = generateTestTokens(adminB);
+
+        const [resA, resB, resA2, resB2] = await Promise.all([
+            request(app).get('/api/v1/__test/tenant-probe').query({ delayMs: 70 }).set('Authorization', `Bearer ${tokensA.accessToken}`),
+            request(app).get('/api/v1/__test/tenant-probe').query({ delayMs: 20 }).set('Authorization', `Bearer ${tokensB.accessToken}`),
+            request(app).get('/api/v1/__test/tenant-probe').query({ delayMs: 40 }).set('Authorization', `Bearer ${tokensA.accessToken}`),
+            request(app).get('/api/v1/__test/tenant-probe').query({ delayMs: 55 }).set('Authorization', `Bearer ${tokensB.accessToken}`)
+        ]);
+
+        for (const res of [resA, resA2]) {
+            expect(res.status).toBe(200);
+            expect(res.body.data.tenantAfterDelay).toBe(orgA.id);
+            expect(res.body.data.tenantInsideTransaction).toBe(orgA.id);
+            expect(res.body.data.writtenOrganizationId).toBe(orgA.id);
+            expect(res.body.data.userOrganizationId).toBe(orgA.id);
+        }
+        for (const res of [resB, resB2]) {
+            expect(res.status).toBe(200);
+            expect(res.body.data.tenantAfterDelay).toBe(orgB.id);
+            expect(res.body.data.tenantInsideTransaction).toBe(orgB.id);
+            expect(res.body.data.writtenOrganizationId).toBe(orgB.id);
+            expect(res.body.data.userOrganizationId).toBe(orgB.id);
+        }
+
+        const rows = await withoutTenant((unscoped) =>
+            unscoped.auditLog.findMany({ where: { action: 'TENANT_PROBE' } })
+        );
+        expect(rows).toHaveLength(4);
+        const orgs = new Set(rows.map((r) => r.organizationId));
+        expect(orgs.has(orgA.id)).toBe(true);
+        expect(orgs.has(orgB.id)).toBe(true);
+        expect(rows.every((r) => r.organizationId === orgA.id || r.organizationId === orgB.id)).toBe(true);
     });
 });

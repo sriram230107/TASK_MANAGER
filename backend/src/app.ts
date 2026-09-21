@@ -4,9 +4,11 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { config } from './config/env';
-import { prisma, withoutTenant } from './utils/prisma';
+import { prisma, withoutTenant, getTenantContext } from './utils/prisma';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { tenantMiddleware } from './middleware/tenant.middleware';
+import { authenticate } from './middleware/auth.middleware';
+import { successResponse, errorResponse } from './utils/response';
 import authRoutes from './routes/auth.routes';
 import adminRoutes from './routes/admin.routes';
 import taskRoutes from './routes/task.routes';
@@ -100,6 +102,38 @@ app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/performance', performanceRoutes);
 app.use('/api/v1/reports', reportRoutes);
 app.use('/api/v1/templates', templateRoutes);
+
+if (config.NODE_ENV === 'test') {
+    app.get('/api/v1/__test/tenant-probe', authenticate, async (req, res) => {
+        const delayMs = Math.min(Number(req.query.delayMs) || 40, 500);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        const ctxAfterDelay = getTenantContext();
+        try {
+            const result = await prisma.$transaction(async (tx) => {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                const ctxInsideTx = getTenantContext();
+                const row = await tx.auditLog.create({
+                    data: {
+                        organizationId: req.user!.organizationId,
+                        userId: req.user!.id,
+                        action: 'TENANT_PROBE',
+                        entity: 'Test',
+                        entityId: req.user!.id
+                    }
+                });
+                return {
+                    tenantAfterDelay: ctxAfterDelay?.organizationId ?? null,
+                    tenantInsideTransaction: ctxInsideTx?.organizationId ?? null,
+                    writtenOrganizationId: row.organizationId,
+                    userOrganizationId: req.user!.organizationId
+                };
+            });
+            successResponse(res, result);
+        } catch (err: any) {
+            errorResponse(res, err?.message || 'tenant probe failed', 500);
+        }
+    });
+}
 
 app.use(notFoundHandler);
 app.use(errorHandler);

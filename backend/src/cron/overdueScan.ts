@@ -10,8 +10,8 @@ import { differenceInDays, isSameDay, subDays } from 'date-fns';
 export const runOverdueScan = async (): Promise<number> => {
     let notificationsSent = 0;
     try {
-        const organizations = await withoutTenant(() =>
-            prisma.organization.findMany({
+        const organizations = await withoutTenant((unscoped) =>
+            unscoped.organization.findMany({
                 select: { id: true }
             })
         );
@@ -148,8 +148,8 @@ export const runAttendanceReminderScan = async (): Promise<number> => {
         const endOfDay = new Date(now);
         endOfDay.setHours(23, 59, 59, 999);
 
-        const organizations = await withoutTenant(() =>
-            prisma.organization.findMany({
+        const organizations = await withoutTenant((unscoped) =>
+            unscoped.organization.findMany({
                 select: { id: true }
             })
         );

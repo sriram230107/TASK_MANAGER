@@ -230,6 +230,19 @@ export const withTenant = <T>(organizationId: string, fn: () => T): T => {
 };
 
 /**
+ * Bind the rest of an Express request to a tenant. Call next() from inside ALS
+ * so later awaits in handlers and $transaction callbacks keep the same store.
+ */
+export const continueRequestInTenant = (
+    organizationId: string,
+    next: (err?: unknown) => void
+): void => {
+    tenantStorage.run({ organizationId }, () => {
+        next();
+    });
+};
+
+/**
  * Executes an audited system task without tenant constraints (e.g. cron scanners, baseline scripts).
  */
 export const withoutTenant = <T>(fn: (unscopedPrisma: PrismaClient) => T): T => {

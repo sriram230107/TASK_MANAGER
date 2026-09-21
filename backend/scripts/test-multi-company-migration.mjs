@@ -51,6 +51,18 @@ if (actualDb !== dbName || !actualDb.endsWith('_test')) {
 
 console.log(`[GUARD PASSED] Running migration lifecycle test on verified test database: "${actualDb}"`);
 
+await client.query(`
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+    LOOP
+        EXECUTE format('TRUNCATE TABLE %I CASCADE', r.tablename);
+    END LOOP;
+END $$;
+`);
+console.log('Truncated application tables on the test database before migration lifecycle checks.');
+
 const migrationSqlPath = path.join(backendDir, 'prisma', 'migrations', '20260921120000_multi_company_readiness', 'migration.sql');
 const rollbackSqlPath = path.join(backendDir, 'prisma', 'rollbacks', 'down_20260921120000_multi_company_readiness.sql');
 
@@ -58,13 +70,23 @@ const migrationSql = fs.readFileSync(migrationSqlPath, 'utf8');
 const rollbackSql = fs.readFileSync(rollbackSqlPath, 'utf8');
 
 try {
-    // --- Step 1: Negative Test (Orphan Row Guard) ---
-    console.log('\n--- Step 1: Testing Negative Case (Orphan Guard) ---');
-    // Ensure we start with baseline schema
     const isWindows = process.platform === 'win32';
     const npxCmd = isWindows ? 'npx.cmd' : 'npx';
 
-    // Insert a system audit row with NULL userId (cannot join to User to determine organizationId)
+    const alreadyMigrated = await client.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'TeamMember' AND column_name = 'organizationId'
+    `);
+    if (alreadyMigrated.rows.length > 0) {
+        console.log('portal_test already has organizationId columns. Applying down SQL first (test database only).');
+        await client.query('BEGIN');
+        await client.query(rollbackSql);
+        await client.query('COMMIT');
+    }
+
+    // --- Step 1: Negative Test (Orphan Row Guard) ---
+    console.log('\n--- Step 1: Testing Negative Case (NULL-user AuditLog abort) ---');
+
     const orphanId = '11111111-1111-1111-1111-111111111111';
     await client.query(`
         INSERT INTO "AuditLog" ("id", "userId", "action", "entity", "entityId", "createdAt")
@@ -84,8 +106,14 @@ try {
         guardErrorMessage = err.message;
     }
 
-    if (!failedAsExpected || !guardErrorMessage.includes('MIGRATION HALTED: Unresolved orphan rows detected')) {
-        console.error('FAIL: Migration did not fail with the expected orphan guard error!');
+    if (
+        !failedAsExpected ||
+        !(
+            guardErrorMessage.includes('NULL userId') ||
+            guardErrorMessage.includes('MIGRATION HALTED: Unresolved orphan rows detected')
+        )
+    ) {
+        console.error('FAIL: Migration did not fail with the expected NULL-user / orphan guard error!');
         console.error('Actual error / outcome:', guardErrorMessage);
         process.exit(1);
     }
@@ -149,6 +177,29 @@ try {
         process.exit(1);
     }
     console.log('SUCCESS: Verified User_organizationId_lower_email_idx expression index exists.');
+
+    console.log('\n--- Step 2b: prisma migrate diff (must not drop LOWER(email) index) ---');
+    const diff = spawnSync(
+        npxCmd,
+        ['prisma', 'migrate', 'diff', '--from-url', testUrl, '--to-schema-datamodel', 'prisma/schema.prisma', '--script'],
+        {
+            encoding: 'utf8',
+            cwd: backendDir,
+            env: { ...process.env, DATABASE_URL: testUrl, NODE_ENV: 'test' },
+            shell: true
+        }
+    );
+    const diffOut = `${diff.stdout || ''}\n${diff.stderr || ''}`;
+    if (diff.status !== 0 && !diffOut.includes('No difference')) {
+        console.error('FAIL: prisma migrate diff exited non-zero.');
+        console.error(diffOut.slice(0, 4000));
+        process.exit(1);
+    }
+    if (/DROP INDEX.*User_organizationId_lower_email_idx/i.test(diffOut)) {
+        console.error('FAIL: prisma migrate diff would drop User_organizationId_lower_email_idx.');
+        process.exit(1);
+    }
+    console.log('SUCCESS: prisma migrate diff does not drop User_organizationId_lower_email_idx.');
 
     // --- Step 3: Rollback Test ---
     console.log('\n--- Step 3: Testing Rollback SQL (Down Migration) ---');
