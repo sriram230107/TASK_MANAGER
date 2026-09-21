@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant, withoutTenant } from '../utils/prisma';
 import { errorResponse } from '../utils/response';
 import { config } from '../config/env';
 
@@ -53,38 +53,41 @@ export const authenticate = async (
             return;
         }
 
-        const user = await prisma.user.findFirst({
-            where: {
-                id: decoded.id,
-                deletedAt: null
-            },
-            select: {
-                id: true,
-                email: true,
-                name: true,
-                role: true,
-                organizationId: true,
-                departmentId: true,
-                managerId: true,
-                teamLeadId: true,
-                createdAt: true,
-                updatedAt: true,
-                deletedAt: true,
-                department: {
-                    select: {
-                        id: true,
-                        name: true,
-                        managerId: true
-                    }
+        const user = await withoutTenant((unscoped) =>
+            unscoped.user.findFirst({
+                where: {
+                    id: decoded.id,
+                    ...(decoded.organizationId ? { organizationId: decoded.organizationId } : {}),
+                    deletedAt: null
                 },
-                organization: {
-                    select: {
-                        id: true,
-                        name: true
+                select: {
+                    id: true,
+                    email: true,
+                    name: true,
+                    role: true,
+                    organizationId: true,
+                    departmentId: true,
+                    managerId: true,
+                    teamLeadId: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    deletedAt: true,
+                    department: {
+                        select: {
+                            id: true,
+                            name: true,
+                            managerId: true
+                        }
+                    },
+                    organization: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
                     }
                 }
-            }
-        });
+            })
+        );
 
         if (!user) {
             errorResponse(res, 'Unauthorized: User not found or inactive', 401);
@@ -92,7 +95,10 @@ export const authenticate = async (
         }
 
         req.user = user as any;
-        next();
+        req.organizationId = user.organizationId;
+        withTenant(user.organizationId, () => {
+            next();
+        });
     } catch (error: any) {
         console.error('Authentication middleware error:', error);
         errorResponse(res, 'Internal authentication error', 500);

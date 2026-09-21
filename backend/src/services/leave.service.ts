@@ -2,6 +2,7 @@ import { prisma } from '../utils/prisma';
 import { LeaveType, LeaveStatus } from '@prisma/client';
 import { isAuthorizedForTarget } from '../utils/hierarchy';
 import { notifyLeaveParticipants } from './notification.service';
+import { logAudit } from './audit.service';
 
 export interface LeaveQueryFilters {
     page?: number;
@@ -35,6 +36,13 @@ const DEFAULT_BALANCES: Record<LeaveType, number> = {
  * Ensures a user has initialized leave balances for the given year.
  */
 export const ensureLeaveBalances = async (userId: string, year: number) => {
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { organizationId: true }
+    });
+    if (!user) return;
+    const organizationId = user.organizationId;
+
     const existing = await prisma.leaveBalance.findMany({
         where: { userId, year }
     });
@@ -42,6 +50,7 @@ export const ensureLeaveBalances = async (userId: string, year: number) => {
     const existingTypes = new Set(existing.map((b) => b.leaveType));
     const toCreate: Array<{
         userId: string;
+        organizationId: string;
         leaveType: LeaveType;
         allocatedDays: number;
         usedDays: number;
@@ -54,6 +63,7 @@ export const ensureLeaveBalances = async (userId: string, year: number) => {
             const allocated = DEFAULT_BALANCES[type];
             toCreate.push({
                 userId,
+                organizationId,
                 leaveType: type,
                 allocatedDays: allocated,
                 usedDays: 0,
@@ -177,6 +187,7 @@ export const applyLeave = async (requestingUser: any, data: CreateLeaveDTO) => {
     // 4. Create record
     const leaveRequest = await prisma.leaveRequest.create({
         data: {
+            organizationId: requestingUser.organizationId,
             employeeId: requestingUser.id,
             type: data.type,
             startDate: start,
@@ -315,8 +326,8 @@ export const reviewLeaveRequest = async (
     updateData.status = nextStatus;
 
     // Database update & balance deduction in a transaction
-    const [updatedLeave] = await prisma.$transaction([
-        prisma.leaveRequest.update({
+    const updatedLeave = await prisma.$transaction(async (tx) => {
+        const updated = await tx.leaveRequest.update({
             where: { id: leaveId },
             data: updateData,
             include: {
@@ -324,37 +335,37 @@ export const reviewLeaveRequest = async (
                 teamLeadReviewer: { select: { id: true, name: true } },
                 managerReviewer: { select: { id: true, name: true } }
             }
-        }),
-        ...(nextStatus === 'APPROVED' && leave.type !== 'UNPAID'
-            ? [
-                  prisma.leaveBalance.updateMany({
-                      where: {
-                          userId: leave.employeeId,
-                          leaveType: leave.type,
-                          year: leave.startDate.getFullYear()
-                      },
-                      data: {
-                          usedDays: { increment: leave.daysCount },
-                          remainingDays: { decrement: leave.daysCount }
-                      }
-                  })
-              ]
-            : [])
-    ]);
+        });
+
+        if (nextStatus === 'APPROVED' && leave.type !== 'UNPAID') {
+            await tx.leaveBalance.updateMany({
+                where: {
+                    userId: leave.employeeId,
+                    leaveType: leave.type,
+                    year: leave.startDate.getFullYear()
+                },
+                data: {
+                    usedDays: { increment: leave.daysCount },
+                    remainingDays: { decrement: leave.daysCount }
+                }
+            });
+        }
+
+        return updated;
+    });
 
     // Audit log
-    await prisma.auditLog.create({
-        data: {
-            userId: reviewer.id,
-            action: action === 'APPROVE' ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
-            entity: 'LeaveRequest',
-            entityId: leaveId,
-            metadata: {
-                employeeId: leave.employeeId,
-                previousStatus: leave.status,
-                newStatus: nextStatus,
-                notes
-            }
+    await logAudit({
+        userId: reviewer.id,
+        organizationId: reviewer.organizationId,
+        action: action === 'APPROVE' ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
+        entity: 'LeaveRequest',
+        entityId: leaveId,
+        metadata: {
+            employeeId: leave.employeeId,
+            previousStatus: leave.status,
+            newStatus: nextStatus,
+            notes
         }
     });
 
@@ -390,30 +401,31 @@ export const cancelLeaveRequest = async (requestingUser: any, leaveId: string) =
 
     const wasApproved = leave.status === 'APPROVED';
 
-    const [cancelled] = await prisma.$transaction([
-        prisma.leaveRequest.update({
+    const cancelled = await prisma.$transaction(async (tx) => {
+        const updated = await tx.leaveRequest.update({
             where: { id: leaveId },
             data: { status: 'CANCELLED' },
             include: {
                 employee: { select: { id: true, name: true, email: true } }
             }
-        }),
-        ...(wasApproved && leave.type !== 'UNPAID'
-            ? [
-                  prisma.leaveBalance.updateMany({
-                      where: {
-                          userId: leave.employeeId,
-                          leaveType: leave.type,
-                          year: leave.startDate.getFullYear()
-                      },
-                      data: {
-                          usedDays: { decrement: leave.daysCount },
-                          remainingDays: { increment: leave.daysCount }
-                      }
-                  })
-              ]
-            : [])
-    ]);
+        });
+
+        if (wasApproved && leave.type !== 'UNPAID') {
+            await tx.leaveBalance.updateMany({
+                where: {
+                    userId: leave.employeeId,
+                    leaveType: leave.type,
+                    year: leave.startDate.getFullYear()
+                },
+                data: {
+                    usedDays: { decrement: leave.daysCount },
+                    remainingDays: { increment: leave.daysCount }
+                }
+            });
+        }
+
+        return updated;
+    });
 
     return cancelled;
 };

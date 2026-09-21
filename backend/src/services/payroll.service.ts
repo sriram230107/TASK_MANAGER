@@ -77,6 +77,7 @@ export const createPayrollRecord = async (creator: User, input: CreatePayrollInp
 
     const record = await prisma.payrollRecord.create({
         data: {
+            organizationId: employee.organizationId,
             employeeId: employee.id,
             periodStart: start,
             periodEnd: end,

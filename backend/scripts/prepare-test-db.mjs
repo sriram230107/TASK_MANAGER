@@ -39,6 +39,10 @@ try {
         console.error(`CRITICAL ABORT: Connected database is "${actualDb}", which does NOT end with "_test".`);
         process.exit(1);
     }
+    if (actualDb !== dbName) {
+        console.error(`CRITICAL ABORT: Connected database "${actualDb}" does not match configured test database "${dbName}".`);
+        process.exit(1);
+    }
     console.log(`Verified test database connection: "${actualDb}" on ${hostname}.`);
 } catch (err) {
     console.error(`ERROR: Could not connect to test database at ${testUrl}: ${err.message}`);

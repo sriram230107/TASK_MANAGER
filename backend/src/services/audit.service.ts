@@ -1,10 +1,11 @@
-import { prisma } from '../utils/prisma';
+import { prisma, getTenantContext } from '../utils/prisma';
 import { Role } from '@prisma/client';
 import { AuditQueryParams } from '../validators/audit.validator';
 import { getDepartmentMemberIds, getDirectReportIds } from '../utils/hierarchy';
 
 export interface AuditLogEntry {
     userId?: string | null;
+    organizationId?: string | null;
     action: string;
     entity: string;
     entityId: string;
@@ -17,8 +18,16 @@ export interface AuditLogEntry {
  */
 export const logAudit = async (entry: AuditLogEntry): Promise<void> => {
     try {
+        const orgId = entry.organizationId || getTenantContext()?.organizationId;
+        if (!orgId) {
+            // Global events go to the application log, not AuditLog per Amendment 2
+            console.log('Global audit event (no org context):', entry);
+            return;
+        }
+
         await prisma.auditLog.create({
             data: {
+                organizationId: orgId,
                 userId: entry.userId || null,
                 action: entry.action,
                 entity: entry.entity,

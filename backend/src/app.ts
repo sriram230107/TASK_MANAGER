@@ -4,8 +4,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { config } from './config/env';
-import { prisma } from './utils/prisma';
+import { prisma, withoutTenant } from './utils/prisma';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { tenantMiddleware } from './middleware/tenant.middleware';
 import authRoutes from './routes/auth.routes';
 import adminRoutes from './routes/admin.routes';
 import taskRoutes from './routes/task.routes';
@@ -57,12 +58,14 @@ app.get('/health', (_req, res) => {
 });
 app.get('/health/ready', async (_req, res) => {
     try {
-        await prisma.$queryRaw`SELECT 1`;
+        await withoutTenant((unscoped) => unscoped.$queryRaw`SELECT 1`);
         res.json({ status: 'ready' });
     } catch {
         res.status(503).json({ status: 'database unavailable' });
     }
 });
+
+app.use('/api', tenantMiddleware);
 
 // Broad limiter for the whole API. Kept generous because a whole office often
 // shares one public IP; stricter limits apply to login (see auth.routes.ts).

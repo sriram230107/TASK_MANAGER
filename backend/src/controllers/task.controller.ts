@@ -219,6 +219,7 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
         const attachment = await prisma.taskAttachment.create({
             data: {
+                organizationId: user.organizationId,
                 taskId: task.id,
                 uploadedById: user.id,
                 fileUrl: fileKey,
@@ -230,6 +231,7 @@ export const uploadAttachment = async (req: Request, res: Response): Promise<voi
 
         await prisma.taskHistory.create({
             data: {
+                organizationId: user.organizationId,
                 taskId: task.id,
                 userId: user.id,
                 action: 'ATTACHMENT_ADDED',

@@ -24,6 +24,7 @@ export const createNotification = async (
 
     return prisma.notification.create({
         data: {
+            organizationId: user.organizationId,
             userId,
             taskId: taskId || null,
             type,
@@ -90,6 +91,7 @@ export const broadcastNotification = async (
 
     const created = await prisma.notification.createMany({
         data: targetUserIds.map((userId) => ({
+            organizationId: sender.organizationId,
             userId,
             type: 'ANNOUNCEMENT',
             message: `[${sender.name} - ${sender.role}]: ${message}`
@@ -230,6 +232,7 @@ export const notifyTaskParticipants = async (
         const task = await prisma.task.findUnique({
             where: { id: taskId },
             select: {
+                organizationId: true,
                 createdById: true,
                 assignedManagerId: true,
                 assignedTeamLeadId: true,
@@ -255,6 +258,7 @@ export const notifyTaskParticipants = async (
 
         await prisma.notification.createMany({
             data: Array.from(participantIds).map((userId) => ({
+                organizationId: task.organizationId,
                 userId,
                 taskId,
                 type,
@@ -275,8 +279,15 @@ export const notifyLeaveParticipants = async (
     message: string
 ) => {
     try {
+        const user = await prisma.user.findUnique({
+            where: { id: recipientId },
+            select: { organizationId: true }
+        });
+        if (!user) return;
+
         await prisma.notification.create({
             data: {
+                organizationId: user.organizationId,
                 userId: recipientId,
                 type,
                 message

@@ -186,6 +186,67 @@ export const canAccessTask = async (user: User, task: any): Promise<boolean> => 
 };
 
 /**
+ * Validates that all referenced entities (departments, teams, assignees, parent tasks, dependencies)
+ * belong strictly to the caller's organization.
+ */
+const validateTaskReferences = async (
+    organizationId: string,
+    refs: {
+        departmentId?: string | null;
+        teamId?: string | null;
+        assignedEmployeeId?: string | null;
+        assignedTeamLeadId?: string | null;
+        assignedManagerId?: string | null;
+        assignedToId?: string | null;
+        parentTaskId?: string | null;
+        dependencies?: string[];
+    }
+): Promise<void> => {
+    if (refs.departmentId) {
+        const dept = await prisma.department.findFirst({
+            where: { id: refs.departmentId, organizationId }
+        });
+        if (!dept) throw new Error('Invalid or cross-tenant department ID');
+    }
+    if (refs.teamId) {
+        const team = await prisma.team.findFirst({
+            where: { id: refs.teamId, organizationId }
+        });
+        if (!team) throw new Error('Invalid or cross-tenant team ID');
+    }
+    const userIds = [
+        refs.assignedEmployeeId,
+        refs.assignedTeamLeadId,
+        refs.assignedManagerId,
+        refs.assignedToId
+    ].filter((id): id is string => Boolean(id));
+
+    for (const uid of userIds) {
+        const u = await prisma.user.findFirst({
+            where: { id: uid, organizationId, deletedAt: null }
+        });
+        if (!u) throw new Error('Invalid or cross-tenant user ID');
+    }
+
+    if (refs.parentTaskId) {
+        const parent = await prisma.task.findFirst({
+            where: { id: refs.parentTaskId, organizationId, deletedAt: null }
+        });
+        if (!parent) throw new Error('Invalid or cross-tenant parent task ID');
+    }
+
+    if (refs.dependencies && refs.dependencies.length > 0) {
+        const depTasks = await prisma.task.findMany({
+            where: { id: { in: refs.dependencies }, organizationId, deletedAt: null },
+            select: { id: true }
+        });
+        if (depTasks.length !== refs.dependencies.length) {
+            throw new Error('Invalid or cross-tenant task dependency ID');
+        }
+    }
+};
+
+/**
  * Creates a new task with strict server-side tenant isolation and hierarchy validation.
  */
 export const createTask = async (creator: User, data: CreateTaskInput) => {
@@ -195,6 +256,17 @@ export const createTask = async (creator: User, data: CreateTaskInput) => {
     let targetManagerId = data.assignedManagerId || null;
     let departmentId = data.departmentId || null;
     let teamId = data.teamId || null;
+
+    // Validate cross-tenant entity references
+    await validateTaskReferences(organizationId, {
+        departmentId,
+        teamId,
+        assignedEmployeeId: targetEmployeeId,
+        assignedTeamLeadId: targetLeadId,
+        assignedManagerId: targetManagerId,
+        parentTaskId: data.parentTaskId,
+        dependencies: data.dependencies
+    });
 
     // 1. Role-specific creation constraints
     if (creator.role === 'EMPLOYEE') {
@@ -291,6 +363,7 @@ export const createTask = async (creator: User, data: CreateTaskInput) => {
     // Create initial audit/history record
     await prisma.taskHistory.create({
         data: {
+            organizationId,
             taskId: task.id,
             userId: creator.id,
             action: 'CREATED',
@@ -303,6 +376,7 @@ export const createTask = async (creator: User, data: CreateTaskInput) => {
     if (targetEmployeeId) {
         await prisma.taskAssignment.create({
             data: {
+                organizationId,
                 taskId: task.id,
                 userId: targetEmployeeId,
                 role: 'ASSIGNEE'
@@ -341,6 +415,17 @@ export const updateTask = async (user: User, taskId: string, data: UpdateTaskInp
         throw new Error('Employees can only update progress and status on assigned tasks');
     }
 
+    // Validate cross-tenant entity references
+    await validateTaskReferences(user.organizationId, {
+        departmentId: data.departmentId,
+        teamId: data.teamId,
+        assignedEmployeeId: data.assignedEmployeeId,
+        assignedTeamLeadId: data.assignedTeamLeadId,
+        assignedManagerId: data.assignedManagerId,
+        assignedToId: data.assignedToId,
+        dependencies: data.dependencies
+    });
+
     const updateData: any = {};
     if (data.title !== undefined) updateData.title = data.title;
     if (data.description !== undefined) updateData.description = data.description;
@@ -377,6 +462,7 @@ export const updateTask = async (user: User, taskId: string, data: UpdateTaskInp
 
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId: task.id,
             userId: user.id,
             action: 'UPDATED',
@@ -468,6 +554,7 @@ export const updateTaskStatus = async (user: User, taskId: string, data: UpdateS
     // Record audit history
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId: task.id,
             userId: user.id,
             action: 'STATUS_CHANGE',
@@ -481,6 +568,7 @@ export const updateTaskStatus = async (user: User, taskId: string, data: UpdateS
     if (data.progressPercent !== undefined || data.comment || data.hoursLogged) {
         await prisma.taskUpdate.create({
             data: {
+                organizationId: user.organizationId,
                 taskId: task.id,
                 userId: user.id,
                 progressPercent: data.progressPercent ?? task.progressPercent,
@@ -538,6 +626,7 @@ export const logTaskProgress = async (
 
     const updateRecord = await prisma.taskUpdate.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             progressPercent: data.progressPercent,
@@ -548,6 +637,7 @@ export const logTaskProgress = async (
 
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             action: 'PROGRESS_LOGGED',
@@ -573,6 +663,7 @@ export const addComment = async (user: User, taskId: string, content: string) =>
 
     const comment = await prisma.taskComment.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             content
@@ -584,6 +675,7 @@ export const addComment = async (user: User, taskId: string, content: string) =>
 
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             action: 'COMMENT_ADDED',
@@ -717,7 +809,7 @@ export const delegateTask = async (
         // Record assignment
         await prisma.taskAssignment.upsert({
             where: { taskId_userId: { taskId, userId: data.assignedEmployeeId } },
-            create: { taskId, userId: data.assignedEmployeeId, role: 'ASSIGNEE' },
+            create: { organizationId: user.organizationId, taskId, userId: data.assignedEmployeeId, role: 'ASSIGNEE' },
             update: { assignedAt: new Date() }
         });
     }
@@ -746,6 +838,7 @@ export const delegateTask = async (
 
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             action: 'DELEGATED',
@@ -781,6 +874,7 @@ export const deleteTask = async (user: User, taskId: string) => {
 
     await prisma.taskHistory.create({
         data: {
+            organizationId: user.organizationId,
             taskId,
             userId: user.id,
             action: 'DELETED',

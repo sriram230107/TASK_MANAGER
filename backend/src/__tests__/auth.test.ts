@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app, createTestOrg, createTestUser } from './helpers/test-app';
 import { cleanDatabase } from './setup';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant } from '../utils/prisma';
 import { hashToken } from '../utils/tokens';
 
 describe('Auth Integration Tests', () => {
@@ -81,7 +81,7 @@ describe('Auth Integration Tests', () => {
 
         // Also check DB record for this user directly via prisma to prove hash is stored,
         // but auth middleware strips it from req.user
-        const dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+        const dbUser = await withTenant(org.id, () => prisma.user.findUnique({ where: { id: user.id } }));
         expect(dbUser?.passwordHash).toBeDefined();
     });
 
@@ -121,9 +121,11 @@ describe('Auth Integration Tests', () => {
         const rawRefreshToken2 = refreshCookie2!.split(';')[0].split('=')[1];
 
         // The old refresh token must now be revoked in database
-        const oldRecord = await prisma.refreshToken.findUnique({
-            where: { tokenHash: hashToken(rawRefreshToken) }
-        });
+        const oldRecord = await withTenant(org.id, () =>
+            prisma.refreshToken.findUnique({
+                where: { tokenHash: hashToken(rawRefreshToken) }
+            })
+        );
         expect(oldRecord?.revokedAt).not.toBeNull();
 
         // Trying to reuse the OLD refresh token must fail with 401

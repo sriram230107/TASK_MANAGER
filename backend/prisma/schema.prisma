@@ -21,6 +21,24 @@ model Organization {
   taskTemplates      TaskTemplate[]
   goals              Goal[]
   documents          Document[]
+  teamMembers        TeamMember[]
+  taskAssignments    TaskAssignment[]
+  taskUpdates        TaskUpdate[]
+  taskComments       TaskComment[]
+  taskAttachments    TaskAttachment[]
+  taskHistories      TaskHistory[]
+  recurrenceRules    RecurrenceRule[]
+  attendances        Attendance[]
+  workSessions       WorkSession[]
+  leaveRequests      LeaveRequest[]
+  leaveBalances      LeaveBalance[]
+  performanceReviews PerformanceReview[]
+  payrollRecords     PayrollRecord[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  activityLogs       ActivityLog[]
+  refreshTokens      RefreshToken[]
+  secrets            OrganizationSecret[]
 }
 
 model Department {
@@ -59,19 +77,22 @@ model Team {
 }
 
 model TeamMember {
-  id       String   @id @default(uuid())
-  teamId   String
-  userId   String
-  joinedAt DateTime @default(now())
-  team     Team     @relation(fields: [teamId], references: [id])
-  user     User     @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  teamId         String
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  joinedAt       DateTime     @default(now())
+  team           Team         @relation(fields: [teamId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
 
   @@unique([teamId, userId])
+  @@index([organizationId])
 }
 
 model User {
   id                          String              @id @default(uuid())
-  email                       String              @unique
+  email                       String
   passwordHash                String
   name                        String
   role                        Role
@@ -115,6 +136,9 @@ model User {
   createdAt                   DateTime            @default(now())
   updatedAt                   DateTime            @updatedAt
   deletedAt                   DateTime?
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
 }
 
 model Task {
@@ -164,80 +188,105 @@ model Task {
 }
 
 model TaskAssignment {
-  id         String   @id @default(uuid())
-  taskId     String
-  userId     String
-  role       String   @default("ASSIGNEE")
-  assignedAt DateTime @default(now())
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  taskId         String
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  role           String       @default("ASSIGNEE")
+  assignedAt     DateTime     @default(now())
+  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
 
   @@unique([taskId, userId])
+  @@index([organizationId])
 }
 
 model TaskUpdate {
-  id              String   @id @default(uuid())
+  id              String       @id @default(uuid())
   taskId          String
   userId          String
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   progressPercent Int
   comment         String?
   hoursLogged     Float?
-  createdAt       DateTime @default(now())
-  task            Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user            User     @relation(fields: [userId], references: [id])
+  createdAt       DateTime     @default(now())
+  task            Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model TaskComment {
-  id        String   @id @default(uuid())
-  taskId    String
-  userId    String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  taskId         String
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  content        String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model TaskAttachment {
-  id           String   @id @default(uuid())
-  taskId       String
-  uploadedById String
-  fileUrl      String
-  fileName     String
-  mimeType     String
-  sizeBytes    Int
-  createdAt    DateTime @default(now())
-  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+  id             String       @id @default(uuid())
+  taskId         String
+  uploadedById   String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fileUrl        String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  createdAt      DateTime     @default(now())
+  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy     User         @relation(fields: [uploadedById], references: [id])
+
+  @@index([organizationId])
 }
 
 model TaskHistory {
-  id         String   @id @default(uuid())
-  taskId     String
-  userId     String
-  action     String
-  fromStatus String?
-  toStatus   String?
-  details    String?
-  createdAt  DateTime @default(now())
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  taskId         String
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  action         String
+  fromStatus     String?
+  toStatus       String?
+  details        String?
+  createdAt      DateTime     @default(now())
+  task           Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model RecurrenceRule {
-  id        String              @id @default(uuid())
-  taskId    String              @unique
-  frequency RecurrenceFrequency
-  interval  Int                 @default(1)
-  endDate   DateTime?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-  task      Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id             String              @id @default(uuid())
+  taskId         String              @unique
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  frequency      RecurrenceFrequency
+  interval       Int                 @default(1)
+  endDate        DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  task           Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 model Attendance {
   id                   String           @id @default(uuid())
   userId               String
+  organizationId       String
+  organization         Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   date                 DateTime
   checkIn              DateTime?
   checkOut             DateTime?
@@ -255,71 +304,87 @@ model Attendance {
   workSessions         WorkSession[]
 
   @@unique([userId, date])
+  @@index([organizationId])
 }
 
 model WorkSession {
   id              String          @id @default(uuid())
   attendanceId    String
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   type            WorkSessionType @default(WORKING)
   startTime       DateTime        @default(now())
   endTime         DateTime?
   durationMinutes Int?
   attendance      Attendance      @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 model LeaveRequest {
-  id                     String      @id @default(uuid())
+  id                     String       @id @default(uuid())
   employeeId             String
+  organizationId         String
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   type                   LeaveType
   startDate              DateTime
   endDate                DateTime
   daysCount              Float
   reason                 String
-  status                 LeaveStatus @default(PENDING_LEAD)
+  status                 LeaveStatus  @default(PENDING_LEAD)
   teamLeadReviewerId     String?
   teamLeadReviewedAt     DateTime?
   managerReviewerId      String?
   managerReviewedAt      DateTime?
   reviewerNotes          String?
-  createdAt              DateTime    @default(now())
-  updatedAt              DateTime    @updatedAt
-  employee               User        @relation("LeaveRequester", fields: [employeeId], references: [id])
-  teamLeadReviewer       User?       @relation("LeaveLeadReviewer", fields: [teamLeadReviewerId], references: [id])
-  managerReviewer        User?       @relation("LeaveManagerReviewer", fields: [managerReviewerId], references: [id])
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  employee               User         @relation("LeaveRequester", fields: [employeeId], references: [id])
+  teamLeadReviewer       User?        @relation("LeaveLeadReviewer", fields: [teamLeadReviewerId], references: [id])
+  managerReviewer        User?        @relation("LeaveManagerReviewer", fields: [managerReviewerId], references: [id])
+
+  @@index([organizationId])
 }
 
 model LeaveBalance {
-  id            String    @id @default(uuid())
-  userId        String
-  leaveType     LeaveType
-  allocatedDays Float
-  usedDays      Float     @default(0)
-  remainingDays Float
-  year          Int
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  user          User      @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  leaveType      LeaveType
+  allocatedDays  Float
+  usedDays       Float        @default(0)
+  remainingDays  Float
+  year           Int
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id])
 
   @@unique([userId, leaveType, year])
+  @@index([organizationId])
 }
 
 model PerformanceReview {
-  id                    String   @id @default(uuid())
+  id                    String       @id @default(uuid())
   employeeId            String
   reviewerId            String
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   taskCompletionRate    Float
   onTimeRate            Float
-  goalsAchievedRate     Float    @default(0)
-  attendanceConsistency Float    @default(100)
+  goalsAchievedRate     Float        @default(0)
+  attendanceConsistency Float        @default(100)
   rating                Int
   periodStart           DateTime
   periodEnd             DateTime
-  cadence               String   @default("QUARTERLY")
+  cadence               String       @default("QUARTERLY")
   comments              String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  employee              User     @relation("Reviewee", fields: [employeeId], references: [id])
-  reviewer              User     @relation("Reviewer", fields: [reviewerId], references: [id])
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  employee              User         @relation("Reviewee", fields: [employeeId], references: [id])
+  reviewer              User         @relation("Reviewer", fields: [reviewerId], references: [id])
+
+  @@index([organizationId])
 }
 
 model Goal {
@@ -345,21 +410,25 @@ model Goal {
 }
 
 model PayrollRecord {
-  id          String        @id @default(uuid())
-  employeeId  String
-  periodStart DateTime
-  periodEnd   DateTime
-  baseSalary  Float
-  allowances  Float         @default(0)
-  deductions  Float         @default(0)
-  overtimePay Float         @default(0)
-  bonuses     Float         @default(0)
-  netSalary   Float
-  payslipUrl  String?
-  status      PayrollStatus @default(DRAFT)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  employee    User          @relation(fields: [employeeId], references: [id])
+  id             String        @id @default(uuid())
+  employeeId     String
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  periodStart    DateTime
+  periodEnd      DateTime
+  baseSalary     Float
+  allowances     Float         @default(0)
+  deductions     Float         @default(0)
+  overtimePay    Float         @default(0)
+  bonuses        Float         @default(0)
+  netSalary      Float
+  payslipUrl     String?
+  status         PayrollStatus @default(DRAFT)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  employee       User          @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId])
 }
 
 model Document {
@@ -383,37 +452,49 @@ model Document {
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  taskId    String?
-  type      String
-  message   String?
-  isRead    Boolean  @default(false)
-  sentAt    DateTime @default(now())
-  task      Task?    @relation(fields: [taskId], references: [id])
-  user      User     @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  taskId         String?
+  type           String
+  message        String?
+  isRead         Boolean      @default(false)
+  sentAt         DateTime     @default(now())
+  task           Task?        @relation(fields: [taskId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String?
-  action    String
-  entity    String
-  entityId  String
-  metadata  Json?
-  ipAddress String?
-  createdAt DateTime @default(now())
-  user      User?    @relation("UserAuditLogs", fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  userId         String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  action         String
+  entity         String
+  entityId       String
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime     @default(now())
+  user           User?        @relation("UserAuditLogs", fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model ActivityLog {
-  id        String   @id @default(uuid())
-  userId    String
-  action    String
-  entity    String
-  entityId  String
-  createdAt DateTime @default(now())
-  user      User     @relation("UserActivityLogs", fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  action         String
+  entity         String
+  entityId       String
+  createdAt      DateTime     @default(now())
+  user           User         @relation("UserActivityLogs", fields: [userId], references: [id])
+
+  @@index([organizationId])
 }
 
 model TaskTemplate {
@@ -429,13 +510,31 @@ model TaskTemplate {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  userId    String
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id])
+  id             String       @id @default(uuid())
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+}
+
+model OrganizationSecret {
+  id             String       @id @default(uuid())
+  organizationId String
+  key            String
+  valueEncrypted String
+  keyVersion     Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
 }
 
 enum Role {

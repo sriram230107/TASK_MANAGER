@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { ZodError } from 'zod';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant, withoutTenant } from '../utils/prisma';
 import { loginSchema } from '../validators/auth.validator';
 import * as authService from '../services/auth.service';
 import { successResponse, errorResponse } from '../utils/response';
@@ -45,12 +45,21 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     try {
         const rawToken = req.cookies.refreshToken;
         if (rawToken) {
-            const record = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
-            if (record && !record.revokedAt) {
-                await prisma.refreshToken.update({
-                    where: { id: record.id },
-                    data: { revokedAt: new Date() }
-                });
+            const tokenHash = hashToken(rawToken);
+            const record = await withoutTenant((unscoped) =>
+                unscoped.refreshToken.findUnique({
+                    where: { tokenHash },
+                    include: { user: { select: { organizationId: true } } }
+                })
+            );
+
+            if (record && !record.revokedAt && record.user?.organizationId) {
+                await withTenant(record.user.organizationId, () =>
+                    prisma.refreshToken.update({
+                        where: { id: record.id },
+                        data: { revokedAt: new Date() }
+                    })
+                );
             }
         }
     } catch (err) { }
@@ -67,36 +76,48 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const record = await prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(rawToken) } });
+        const tokenHash = hashToken(rawToken);
+        const record = await withoutTenant((unscoped) =>
+            unscoped.refreshToken.findUnique({
+                where: { tokenHash },
+                include: { user: { select: { id: true, email: true, name: true, role: true, organizationId: true, departmentId: true, deletedAt: true } } }
+            })
+        );
 
         if (!record || record.revokedAt || record.expiresAt < new Date()) {
             errorResponse(res, 'Unauthorized: Invalid or expired refresh token', 401);
             return;
         }
 
-        const user = await prisma.user.findFirst({
-            where: { id: record.userId, deletedAt: null }
-        });
-        if (!user) {
+        const user = record.user;
+        if (!user || user.deletedAt) {
             errorResponse(res, 'Unauthorized: User not found', 401);
             return;
         }
 
-        // Rotate: revoke the old refresh token and issue a new pair.
-        await prisma.refreshToken.update({
-            where: { id: record.id },
-            data: { revokedAt: new Date() }
-        });
+        // Execute rotation strictly inside user's tenant context
+        const { newAccessToken, next } = await withTenant(user.organizationId, async () => {
+            await prisma.refreshToken.update({
+                where: { id: record.id },
+                data: { revokedAt: new Date() }
+            });
 
-        const newAccessToken = signAccessToken(user);
-        const next = createRefreshToken();
+            const newAccessToken = signAccessToken(user as any);
+            const next = createRefreshToken();
 
-        await prisma.refreshToken.create({
-            data: { userId: user.id, tokenHash: next.hash, expiresAt: next.expiresAt }
+            await prisma.refreshToken.create({
+                data: {
+                    userId: user.id,
+                    organizationId: user.organizationId,
+                    tokenHash: next.hash,
+                    expiresAt: next.expiresAt
+                }
+            });
+
+            return { newAccessToken, next };
         });
 
         setAuthCookies(res, newAccessToken, next.raw);
-
         successResponse(res, { accessToken: newAccessToken });
     } catch (error: any) {
         errorResponse(res, error.message || 'Unauthorized: Token refresh failed', 401);

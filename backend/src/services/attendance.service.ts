@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { AttendanceStatus, WorkSessionType } from '@prisma/client';
 import { isAuthorizedForTarget } from '../utils/hierarchy';
+import { logAudit } from './audit.service';
 
 export interface AttendanceQueryFilters {
     page?: number;
@@ -134,6 +135,7 @@ export const checkIn = async (
 
     const attendance = await prisma.attendance.create({
         data: {
+            organizationId: requestingUser.organizationId,
             userId: targetId,
             date: todayDate,
             checkIn: now,
@@ -143,6 +145,7 @@ export const checkIn = async (
             notes: data.notes || null,
             workSessions: {
                 create: {
+                    organizationId: requestingUser.organizationId,
                     type: 'WORKING',
                     startTime: now
                 }
@@ -197,6 +200,7 @@ export const startBreak = async (requestingUser: any, notes?: string) => {
 
     const breakSession = await prisma.workSession.create({
         data: {
+            organizationId: requestingUser.organizationId,
             attendanceId: attendance.id,
             type: 'BREAK',
             startTime: now
@@ -242,25 +246,26 @@ export const endBreak = async (requestingUser: any) => {
     const now = new Date();
     const breakDuration = Math.max(1, Math.round((now.getTime() - activeSession.startTime.getTime()) / (1000 * 60)));
 
-    await prisma.$transaction([
-        prisma.workSession.update({
+    await prisma.$transaction(async (tx) => {
+        await tx.workSession.update({
             where: { id: activeSession.id },
             data: { endTime: now, durationMinutes: breakDuration }
-        }),
-        prisma.attendance.update({
+        });
+        await tx.attendance.update({
             where: { id: attendance.id },
             data: {
                 breakDurationMinutes: { increment: breakDuration }
             }
-        }),
-        prisma.workSession.create({
+        });
+        await tx.workSession.create({
             data: {
+                organizationId: requestingUser.organizationId,
                 attendanceId: attendance.id,
                 type: 'WORKING',
                 startTime: now
             }
-        })
-    ]);
+        });
+    });
 
     return {
         attendanceId: attendance.id,
@@ -538,18 +543,17 @@ export const updateAttendanceRecord = async (
     });
 
     // Audit log entry
-    await prisma.auditLog.create({
-        data: {
-            userId: requestingUser.id,
-            action: 'UPDATE_ATTENDANCE_RECORD',
-            entity: 'Attendance',
-            entityId: attendanceId,
-            metadata: {
-                adjustedFor: record.userId,
-                adjustments: data
-            } as any
+    await logAudit({
+        userId: requestingUser.id,
+        organizationId: requestingUser.organizationId,
+        action: 'UPDATE_ATTENDANCE_RECORD',
+        entity: 'Attendance',
+        entityId: attendanceId,
+        metadata: {
+            adjustedFor: record.userId,
+            adjustments: data
         }
-    }).catch(() => {});
+    });
 
     return updated;
 };

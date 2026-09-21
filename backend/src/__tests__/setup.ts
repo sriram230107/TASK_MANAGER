@@ -52,6 +52,9 @@ const verifyTestDatabase = async () => {
         if (!actualDb || !actualDb.endsWith('_test')) {
             throw new Error(`CRITICAL ABORT: Connected database is "${actualDb}", which does NOT end with "_test"!`);
         }
+        if (actualDb !== dbName) {
+            throw new Error(`CRITICAL ABORT: Connected database "${actualDb}" does not match configured test database "${dbName}"!`);
+        }
         verifiedDatabaseName = actualDb;
     } finally {
         await client.end().catch(() => {});
@@ -63,16 +66,20 @@ export const cleanDatabase = async () => {
     if (!verifiedDatabaseName || !verifiedDatabaseName.endsWith('_test')) {
         throw new Error('CRITICAL ABORT: Cannot clean database without verified _test database.');
     }
-    const { prisma } = await import('../utils/prisma');
-    const tablenames = await prisma.$queryRaw<Array<{ tablename: string }>>`
-        SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != '_prisma_migrations';
-    `;
-    const tables = tablenames
-        .map(({ tablename }) => `"${tablename}"`)
-        .join(', ');
-    if (tables.length > 0) {
-        await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${tables} CASCADE;`);
-    }
+    const { clearSingleOrgCache } = await import('../middleware/tenant.middleware');
+    clearSingleOrgCache();
+    const { withoutTenant } = await import('../utils/prisma');
+    await withoutTenant(async (unscoped) => {
+        const tablenames = await unscoped.$queryRaw<Array<{ tablename: string }>>`
+            SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename != '_prisma_migrations';
+        `;
+        const tables = tablenames
+            .map(({ tablename }) => `"${tablename}"`)
+            .join(', ');
+        if (tables.length > 0) {
+            await unscoped.$executeRawUnsafe(`TRUNCATE TABLE ${tables} CASCADE;`);
+        }
+    });
 };
 
 import { beforeAll, afterAll } from 'vitest';

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app, createTestOrg, createTestUser, generateTestTokens } from './helpers/test-app';
 import { cleanDatabase } from './setup';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant } from '../utils/prisma';
 
 describe('Task Status Workflow & Role Permissions', () => {
     beforeEach(async () => {
@@ -37,18 +37,20 @@ describe('Task Status Workflow & Role Permissions', () => {
         const emp2Tokens = generateTestTokens(emp2);
 
         // Manager creates task assigned to Employee 1
-        const task = await prisma.task.create({
-            data: {
-                title: 'Build Authentication',
-                status: 'ASSIGNED',
-                priority: 'HIGH',
-                organizationId: org.id,
-                createdById: manager.id,
-                assignedToId: emp1.id,
-                assignedEmployeeId: emp1.id,
-                assignedManagerId: manager.id
-            }
-        });
+        const task = await withTenant(org.id, () =>
+            prisma.task.create({
+                data: {
+                    title: 'Build Authentication',
+                    status: 'ASSIGNED',
+                    priority: 'HIGH',
+                    organizationId: org.id,
+                    createdById: manager.id,
+                    assignedToId: emp1.id,
+                    assignedEmployeeId: emp1.id,
+                    assignedManagerId: manager.id
+                }
+            })
+        );
 
         // 1. Employee 2 cannot update Employee 1's task
         const emp2Res = await request(app)

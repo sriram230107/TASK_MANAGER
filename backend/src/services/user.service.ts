@@ -2,6 +2,7 @@ import { prisma } from '../utils/prisma';
 import bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
 import { isAuthorizedForTarget } from '../utils/hierarchy';
+import { logAudit } from './audit.service';
 
 export interface UserQueryFilters {
     page?: number;
@@ -355,18 +356,17 @@ export const updateUserProfile = async (
     });
 
     // 5. Audit Log (Non-blocking)
-    await prisma.auditLog.create({
-        data: {
-            userId: requestingUser.id,
-            action: 'UPDATE_USER_PROFILE',
-            entity: 'User',
-            entityId: targetUserId,
-            metadata: {
-                updatedBy: requestingUser.email,
-                changes: data
-            } as any
+    await logAudit({
+        userId: requestingUser.id,
+        organizationId: requestingUser.organizationId,
+        action: 'UPDATE_USER_PROFILE',
+        entity: 'User',
+        entityId: targetUserId,
+        metadata: {
+            updatedBy: requestingUser.email,
+            changes: data
         }
-    }).catch(() => {});
+    });
 
     return updated;
 };
@@ -419,18 +419,17 @@ export const createUser = async (adminUser: any, data: CreateUserDTO) => {
         }
     });
 
-    await prisma.auditLog.create({
-        data: {
-            userId: adminUser.id,
-            action: 'CREATE_USER',
-            entity: 'User',
-            entityId: newUser.id,
-            metadata: {
-                createdUserEmail: newUser.email,
-                role: newUser.role
-            } as any
+    await logAudit({
+        userId: adminUser.id,
+        organizationId: adminUser.organizationId,
+        action: 'CREATE_USER',
+        entity: 'User',
+        entityId: newUser.id,
+        metadata: {
+            createdUserEmail: newUser.email,
+            role: newUser.role
         }
-    }).catch(() => {});
+    });
 
     return newUser;
 };

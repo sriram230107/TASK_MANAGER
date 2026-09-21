@@ -21,7 +21,7 @@ export const loginUser = async (data: z.infer<typeof loginSchema>) => {
     const refresh = createRefreshToken();
 
     await prisma.refreshToken.create({
-        data: { userId: user.id, tokenHash: refresh.hash, expiresAt: refresh.expiresAt }
+        data: { userId: user.id, organizationId: user.organizationId, tokenHash: refresh.hash, expiresAt: refresh.expiresAt }
     });
 
     return { user, accessToken, refreshToken: refresh.raw };

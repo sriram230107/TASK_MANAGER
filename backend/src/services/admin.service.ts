@@ -54,7 +54,7 @@ export const addTeamMember = async (admin: any, teamId: string, data: z.infer<ty
     if (user.role !== 'EMPLOYEE') throw new Error('Only employees can be added as team members');
 
     return prisma.teamMember.create({
-        data: { teamId, userId: data.userId }
+        data: { teamId, userId: data.userId, organizationId: admin.organizationId }
     });
 };
 

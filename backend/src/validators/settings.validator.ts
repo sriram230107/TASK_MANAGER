@@ -51,7 +51,17 @@ export const updateDepartmentSchema = z.object({
     managerId: z.string().uuid('Invalid manager ID').optional().nullable()
 });
 
+export const updateSmtpSecretSchema = z.object({
+    password: z.string().min(1, 'Password is required')
+});
+
+export const updateAiSecretSchema = z.object({
+    apiKey: z.string().min(1, 'API key is required')
+});
+
 export type UpdateOrgSettingsDTO = z.infer<typeof updateOrgSettingsSchema>;
 export type CreateDepartmentDTO = z.infer<typeof createDepartmentSchema>;
 export type UpdateDepartmentDTO = z.infer<typeof updateDepartmentSchema>;
 export type HolidayItem = z.infer<typeof holidayItemSchema>;
+export type UpdateSmtpSecretDTO = z.infer<typeof updateSmtpSecretSchema>;
+export type UpdateAiSecretDTO = z.infer<typeof updateAiSecretSchema>;

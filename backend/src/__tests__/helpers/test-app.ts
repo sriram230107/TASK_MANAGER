@@ -8,12 +8,15 @@ import { Role } from '@prisma/client';
 export { app };
 
 export const createTestOrg = async (name = 'Test Org') => {
-    return prisma.organization.create({
-        data: {
-            name,
-            settings: { timezone: 'UTC' }
-        }
-    });
+    const { withoutTenant } = await import('../../utils/prisma');
+    return withoutTenant((unscoped) =>
+        unscoped.organization.create({
+            data: {
+                name,
+                settings: { timezone: 'UTC' }
+            }
+        })
+    );
 };
 
 export const createTestUser = async (params: {
@@ -27,18 +30,21 @@ export const createTestUser = async (params: {
     password?: string;
 }) => {
     const passwordHash = await bcrypt.hash(params.password || 'TestPassword123!', 4);
-    return prisma.user.create({
-        data: {
-            organizationId: params.orgId,
-            email: params.email.toLowerCase(),
-            name: params.name || params.email.split('@')[0],
-            role: params.role,
-            passwordHash,
-            departmentId: params.departmentId || null,
-            managerId: params.managerId || null,
-            teamLeadId: params.teamLeadId || null
-        }
-    });
+    const { withTenant } = await import('../../utils/prisma');
+    return withTenant(params.orgId, () =>
+        prisma.user.create({
+            data: {
+                organizationId: params.orgId,
+                email: params.email.toLowerCase(),
+                name: params.name || params.email.split('@')[0],
+                role: params.role,
+                passwordHash,
+                departmentId: params.departmentId || null,
+                managerId: params.managerId || null,
+                teamLeadId: params.teamLeadId || null
+            }
+        })
+    );
 };
 
 export const generateTestTokens = (user: { id: string; role: string; organizationId: string }) => {

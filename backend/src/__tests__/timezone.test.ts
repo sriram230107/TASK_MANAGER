@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { isValidTimezone, getOrganizationDayRange, formatDateInTimezone } from '../utils/timezone';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant } from '../utils/prisma';
 import { cleanDatabase } from './setup';
 import { createTestOrg, createTestUser } from './helpers/test-app';
 import { getOrganizationSettings, updateOrganizationSettings } from '../services/settings.service';
@@ -64,24 +64,26 @@ describe('Organization Settings Timezone Persistence', () => {
             organizationId: org.id
         };
 
-        // 1. Initial timezone defaults to UTC from settings JSON
-        const initial = await getOrganizationSettings(userContext);
-        expect(initial.timezone).toBe('UTC');
+        await withTenant(org.id, async () => {
+            // 1. Initial timezone defaults to UTC from settings JSON
+            const initial = await getOrganizationSettings(userContext);
+            expect(initial.timezone).toBe('UTC');
 
-        // 2. Update timezone to Asia/Kolkata
-        await updateOrganizationSettings(userContext, {
-            timezone: 'Asia/Kolkata'
+            // 2. Update timezone to Asia/Kolkata
+            await updateOrganizationSettings(userContext, {
+                timezone: 'Asia/Kolkata'
+            });
+
+            // 3. Verify settings JSON in database was updated
+            const dbOrg = await prisma.organization.findUnique({
+                where: { id: org.id }
+            });
+            const settings = dbOrg?.settings as Record<string, any>;
+            expect(settings?.timezone).toBe('Asia/Kolkata');
+
+            // 4. Verify getOrganizationSettings returns the updated timezone
+            const updated = await getOrganizationSettings(userContext);
+            expect(updated.timezone).toBe('Asia/Kolkata');
         });
-
-        // 3. Verify settings JSON in database was updated
-        const dbOrg = await prisma.organization.findUnique({
-            where: { id: org.id }
-        });
-        const settings = dbOrg?.settings as Record<string, any>;
-        expect(settings?.timezone).toBe('Asia/Kolkata');
-
-        // 4. Verify getOrganizationSettings returns the updated timezone
-        const updated = await getOrganizationSettings(userContext);
-        expect(updated.timezone).toBe('Asia/Kolkata');
     });
 });

@@ -9,6 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: SafeUser;
+      organizationId?: string;
       scope?: {
         organizationId: string;
         userWhere: any;

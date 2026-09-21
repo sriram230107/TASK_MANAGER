@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import { app, createTestOrg, createTestUser, generateTestTokens } from './helpers/test-app';
 import { cleanDatabase } from './setup';
-import { prisma } from '../utils/prisma';
+import { prisma, withTenant } from '../utils/prisma';
 
 describe('Payroll Permissions and Scoping Tests', () => {
     beforeEach(async () => {
@@ -49,34 +49,40 @@ describe('Payroll Permissions and Scoping Tests', () => {
         const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
 
         // Create records for emp1 and emp2
-        const rec1 = await prisma.payrollRecord.create({
-            data: {
-                employeeId: emp1.id,
-                periodStart: startOfMonth,
-                periodEnd: endOfMonth,
-                baseSalary: 5000.0,
-                allowances: 200.0,
-                overtimePay: 100.0,
-                bonuses: 500.0,
-                deductions: 300.0,
-                netSalary: 5500.0,
-                status: 'DRAFT'
-            }
-        });
+        let rec1: any;
+        let rec2: any;
+        await withTenant(org.id, async () => {
+            rec1 = await prisma.payrollRecord.create({
+                data: {
+                    organizationId: org.id,
+                    employeeId: emp1.id,
+                    periodStart: startOfMonth,
+                    periodEnd: endOfMonth,
+                    baseSalary: 5000.0,
+                    allowances: 200.0,
+                    overtimePay: 100.0,
+                    bonuses: 500.0,
+                    deductions: 300.0,
+                    netSalary: 5500.0,
+                    status: 'DRAFT'
+                }
+            });
 
-        const rec2 = await prisma.payrollRecord.create({
-            data: {
-                employeeId: emp2.id,
-                periodStart: startOfMonth,
-                periodEnd: endOfMonth,
-                baseSalary: 6000.0,
-                allowances: 300.0,
-                overtimePay: 0.0,
-                bonuses: 600.0,
-                deductions: 400.0,
-                netSalary: 6500.0,
-                status: 'DRAFT'
-            }
+            rec2 = await prisma.payrollRecord.create({
+                data: {
+                    organizationId: org.id,
+                    employeeId: emp2.id,
+                    periodStart: startOfMonth,
+                    periodEnd: endOfMonth,
+                    baseSalary: 6000.0,
+                    allowances: 300.0,
+                    overtimePay: 0.0,
+                    bonuses: 600.0,
+                    deductions: 400.0,
+                    netSalary: 6500.0,
+                    status: 'DRAFT'
+                }
+            });
         });
 
         const emp1Tokens = generateTestTokens(emp1);

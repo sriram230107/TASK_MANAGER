@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
 import * as settingsService from '../services/settings.service';
+import * as secretService from '../services/secret.service';
 import {
     updateOrgSettingsSchema,
     createDepartmentSchema,
-    updateDepartmentSchema
+    updateDepartmentSchema,
+    updateSmtpSecretSchema,
+    updateAiSecretSchema
 } from '../validators/settings.validator';
 import { successResponse, errorResponse } from '../utils/response';
 
@@ -191,5 +194,85 @@ export const deleteDepartment = async (req: Request, res: Response): Promise<voi
         }
         console.error('Delete department error:', err);
         errorResponse(res, err.message || 'Failed to delete department', 400);
+    }
+};
+
+/**
+ * Get organization integration status (whether SMTP / AI secrets are configured)
+ * Never returns secret values.
+ */
+export const getIntegrationStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const user = req.user;
+        if (!user) {
+            errorResponse(res, 'Unauthorized', 401);
+            return;
+        }
+
+        const status = await secretService.getIntegrationStatus(user.organizationId);
+        successResponse(res, status);
+    } catch (err: any) {
+        console.error('Get integration status error:', err);
+        errorResponse(res, err.message || 'Failed to retrieve integration status', 500);
+    }
+};
+
+/**
+ * Update organization SMTP secret
+ * ADMIN only
+ */
+export const updateSmtpSecret = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const user = req.user;
+        if (!user) {
+            errorResponse(res, 'Unauthorized', 401);
+            return;
+        }
+
+        const parseResult = updateSmtpSecretSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            errorResponse(res, parseResult.error.issues[0].message, 400);
+            return;
+        }
+
+        const result = await secretService.setSmtpSecret(user, parseResult.data.password);
+        successResponse(res, result);
+    } catch (err: any) {
+        if (err.message?.startsWith('FORBIDDEN')) {
+            errorResponse(res, err.message, 403);
+            return;
+        }
+        console.error('Update SMTP secret error:', err);
+        errorResponse(res, err.message || 'Failed to update SMTP secret', 400);
+    }
+};
+
+/**
+ * Update organization AI API key secret
+ * ADMIN only
+ */
+export const updateAiSecret = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const user = req.user;
+        if (!user) {
+            errorResponse(res, 'Unauthorized', 401);
+            return;
+        }
+
+        const parseResult = updateAiSecretSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            errorResponse(res, parseResult.error.issues[0].message, 400);
+            return;
+        }
+
+        const result = await secretService.setAiSecret(user, parseResult.data.apiKey);
+        successResponse(res, result);
+    } catch (err: any) {
+        if (err.message?.startsWith('FORBIDDEN')) {
+            errorResponse(res, err.message, 403);
+            return;
+        }
+        console.error('Update AI secret error:', err);
+        errorResponse(res, err.message || 'Failed to update AI secret', 400);
     }
 };

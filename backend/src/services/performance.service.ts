@@ -453,6 +453,7 @@ export const submitReview = async (reviewer: User, data: CreateReviewDTO) => {
 
     const review = await prisma.performanceReview.create({
         data: {
+            organizationId: reviewer.organizationId,
             employeeId: data.employeeId,
             reviewerId: reviewer.id,
             rating: data.rating,
