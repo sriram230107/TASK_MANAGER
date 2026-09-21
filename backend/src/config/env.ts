@@ -65,6 +65,8 @@ const schema = z.object({
     // --- Runtime switches -------------------------------------------------------
     // Set to false on all but one instance if you ever run more than one API server.
     ENABLE_CRON: bool(true),
+    MULTI_COMPANY_ENABLED: bool(false),
+    ENCRYPTION_KEY: optionalString,
 
     // --- Files ------------------------------------------------------------------
     STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
@@ -107,6 +109,7 @@ if (env.NODE_ENV === 'production') {
     if (env.JWT_REFRESH_SECRET.length < 32) problems.push('JWT_REFRESH_SECRET must be at least 32 characters in production');
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) problems.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different');
     if (env.COOKIE_SAMESITE === 'none' && !env.COOKIE_SECURE) problems.push('COOKIE_SAMESITE=none requires COOKIE_SECURE=true');
+    if (env.ENCRYPTION_KEY && env.ENCRYPTION_KEY.length < 32) problems.push('ENCRYPTION_KEY must be at least 32 characters in production');
     if (problems.length) {
         throw new Error(`Unsafe production configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
     }
