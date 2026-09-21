@@ -41,6 +41,8 @@ KNOWN ISSUES
 
 - The Phase 16 claim of 83 passing automated integration tests is unverified because no test files exist in the repository (the backend test script was a placeholder). Real automated tests (Vitest + Supertest) are being created in Stage 1.
 
+2026-09-21 note (do not treat COMPLETE claims as verified): the headings and Phase 1–16 COMPLETE / 83-test claims above were not reproduced in this repository at Stage 1 start. Verified automated tests as of the Stage 2 resume check: `npm --prefix backend run test` reported 7 files, 32 tests passed (Vitest + Supertest on `portal_test` only). Decimal payroll migration is still pending. Stage 2 multi-company work is in progress on `stage-2-tenant-ready`.
+
 Feature matrix
 Feature	UI	Service	API	DB	RBAC/Scope	E2E
 Auth & Session	WORKING	WORKING	WORKING	WORKING	WORKING	WORKING

@@ -4,14 +4,14 @@ The agent updates this file at the end of every stage. It is the source of truth
 
 ## How to resume in a new conversation
 
-Paste the "Resume prompt" from `docs/ANTIGRAVITY_PROMPT.md`.
+Read `docs/PROGRESS.md`, `docs/RESUME_STATE.md`, `docs/plans/` and `git log`, then continue from the first incomplete stage. The older paste-in prompt is in `docs/ANTIGRAVITY_PROMPT.md`.
 
 ## Stages
 
 | # | Stage | Workflow file | Plan review | Status | Branch | Completed |
 |---|---|---|---|---|---|---|
 | 1 | Foundation finish | `.agents/workflows/phase-0-finish.md` | Yes | Partially complete, waiting for payroll inspection | stage-1-foundation-finish | |
-| 2 | Multi-company readiness | `.agents/workflows/tenant-ready.md` | Yes | Not started | | |
+| 2 | Multi-company readiness | `.agents/workflows/tenant-ready.md` | Yes | In progress (plan approved) | stage-2-tenant-ready | |
 | 3 | Login and identity | `.agents/workflows/phase-1-identity.md` | Yes | Not started | | |
 | 4 | Modern UI, design system, 3D | `.agents/workflows/phase-2-design-system.md` | Yes (design plan) | Not started | | |
 | 5 | Task engine v2 | `.agents/workflows/phase-3-task-engine.md` | Yes (data migration) | Not started | | |
@@ -41,12 +41,18 @@ Paste the "Resume prompt" from `docs/ANTIGRAVITY_PROMPT.md`.
 | 2026-09-20 | 1 | Timezone: UTC schema/code default, Asia/Kolkata for existing org stored in Organization.settings JSON; Storage: local; Test DB: user-managed (*_test via TEST_DATABASE_URL) | User |
 | 2026-09-20 | 1 | Defer S3 storage driver (@aws-sdk/client-s3) since local storage is active. Storage adapter interface created with local driver; S3 deferred until cloud storage is requested. | User |
 | 2026-09-20 | 5 | Preserve PROJECT_SPEC.md task lifecycle (DRAFT, ASSIGNED, ACCEPTED, IN_PROGRESS, ON_HOLD, SUBMITTED, UNDER_REVIEW, COMPLETED, CHANGES_REQUESTED, CANCELLED; OVERDUE derived). No reduction to 8 statuses. | User |
+| 2026-09-20 | 1 | Float to Decimal payroll migration is NOT generated until the owner sends payroll inspection numbers. It MUST be done before Stage 10. | User |
+| 2026-09-21 | 2 | Tenant resolution: never trust a client-supplied organization header or body. Default MULTI_COMPANY_ENABLED=false. After login, tenant always comes from the authenticated user. | User |
+| 2026-09-21 | 2 | AuditLog.organizationId is NOT NULL. Background jobs iterate per organization. Global events go to the pino application log, not AuditLog. | User |
+| 2026-09-21 | 2 | Per-company SMTP and AI credentials live in OrganizationSecret, AES-256-GCM, write-only API. ENCRYPTION_KEY is 64 hex characters in production. | User |
+| 2026-09-21 | 2 | AuditLog NULL-user rows: migration never assigns or guesses; it aborts. Dry-run may reassign only with --system-org-id plus --confirm-count matching the exact row count, run by the owner before migrate deploy. | User |
+| 2026-09-21 | 2 | API envelope is { data, error } per PROJECT_SPEC.md. Do not add new envelope fields. | User |
 
 ## Backlog and known issues
 
 | Found in stage | Issue | Severity | Status |
 |---|---|---|---|
-| Stage 1 preflight | Phase 16 unverified test suite claim documented in IMPLEMENTATION_STATUS.md | Low | Resolved by Stage 1 automated test harness |
+| Stage 1 preflight | Phase 16 unverified test suite claim documented in IMPLEMENTATION_STATUS.md | Low | Open (dated note added 2026-09-21; complete claims remain unverified) |
 | Stage 1 | pg client.query deprecation warning in tests | Low | Open |
 | Stage 1 | Thin test coverage for hierarchy and task status (one test each) | Low | Open |
 | Stage 1 | Decimal money migration is waiting for real payroll inspection numbers and MUST be done before Stage 10 (HR modernization) | Medium | Open |

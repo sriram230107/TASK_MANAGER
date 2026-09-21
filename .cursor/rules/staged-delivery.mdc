@@ -1,0 +1,6 @@
+---
+description: Staged delivery protocol
+alwaysApply: true
+---
+
+read AGENTS.md "Staged delivery protocol" and docs/PROGRESS.md before any work; never read .env files; never run Prisma or tests against the real DATABASE_URL; stop at every stage gate and wait for my "continue";

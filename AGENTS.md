@@ -16,7 +16,7 @@ If they conflict with this file, `docs/ROADMAP.md` or a workflow, stop and show 
 
 ## Stack and layout
 
-- `backend/` Node 22, Express 5, TypeScript (CommonJS), Prisma 7 with `@prisma/adapter-pg`, PostgreSQL, zod 4
+- `backend/` Node 22 or newer, Express 5, TypeScript (CommonJS), Prisma 7 with `@prisma/adapter-pg`, PostgreSQL, zod 4
   - `src/config/env.ts` the only place that reads `process.env` (new code must use `config`)
   - `src/routes` then `src/controllers` then `src/services` then Prisma. Validators in `src/validators` (zod)
   - `src/middleware` (`auth`, `rbac`, `error`), `src/utils` (`hierarchy`, `cookies`, `tokens`, `response`)
@@ -46,8 +46,8 @@ The backend `test` script is a placeholder until tests are added in Stage 1. Use
 6. **Errors** use `errorResponse` and never expose internals. Do not catch and rethrow raw `error.message` from unexpected failures.
 7. **Uploads** are validated by content (magic bytes), not by client MIME type, and go through the storage adapter once it exists.
 8. **Schema changes** are additive and reversible where possible, delivered as a Prisma migration plus a backfill script that is safe to run twice. Explain data-loss risk before proposing anything destructive.
-9. Keep API responses in the `{ data, meta, error }` envelope. Do not add new "legacy mirror" fields.
-10. Do not add a dependency without saying why, and check it supports React 19.2 and Node 22 first.
+9. Keep API responses in the `{ data, error }` envelope (`PROJECT_SPEC.md`). Do not add new envelope fields. `backend/src/utils/response.ts` already includes optional `meta` on success and a top-level `message` plus spread of `data` for older clients; do not add more.
+10. Do not add a dependency without saying why, and check it supports React 19.2 and Node 22 or newer first.
 
 ## AI features (when built)
 

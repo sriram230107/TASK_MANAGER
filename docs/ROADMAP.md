@@ -5,7 +5,7 @@ workflow in `.agents/workflows/` (run it by typing `/name` in the agent chat).
 
 | Phase | Workflow | Focus | Size | Status |
 |---|---|---|---|---|
-| 0 | `/phase-0-finish` | Foundation: config, Docker, bootstrap, security basics, migrations, storage adapter, Decimal money, timezone, tests, CI | M | Complete (Stage 1) |
+| 0 | `/phase-0-finish` | Foundation: config, Docker, bootstrap, security basics, migrations, storage adapter, Decimal money, timezone, tests, CI | M | Partial (Stage 1): Decimal payroll migration still waiting for inspection numbers |
 | 1 | `/phase-1-identity` | Invite onboarding, password reset, lockout, 2FA, SSO, sessions, cookie-only auth, email service | L | Planned |
 | 2 | `/phase-2-design-system` | New UI: design system, theming and branding, real routing, command palette, accessibility, PWA, i18n, 3D | L | Planned |
 | 3 | `/phase-3-task-engine` | Task model v2, Kanban, calendar, timeline, task drawer, recurring, automation, real-time | XL | Planned |
@@ -16,12 +16,14 @@ workflow in `.agents/workflows/` (run it by typing `/name` in the agent chat).
 | 6 | `/phase-6-hr-modernization` | Leave calendar, attendance, payslips with configurable rules, goals and reviews, document versioning | L | Planned |
 | 7 | `/phase-7-ai-advanced` | Assistant chat, risk prediction, smart assignment, reports in plain language, review drafting, anomaly flags | L | Planned |
 | 8 | `/phase-8-scale` | Caching, monitoring, backups, load tests, webhooks, public API, push | M | Planned |
-| any | `/tenant-ready` | Preparation for many companies (see `docs/MULTI_COMPANY_READINESS.md`) | M | Planned, best done with Phase 0 |
+| any | `/tenant-ready` | Preparation for many companies (see `docs/MULTI_COMPANY_READINESS.md`) | M | In progress (Stage 2, branch stage-2-tenant-ready) |
 | any | `/verify-phase` | Checklist to run at the end of every phase | S | Ready |
 
 ## Phase 0 status
 
-Complete in Stage 1:
+**Not complete.** Stage 1 delivered the items below, but the Float to Decimal payroll migration is still waiting for the owner's inspection numbers and must be done before Stage 10. Do not treat Phase 0 as finished.
+
+Delivered in Stage 1:
 - Baselined migration `0_init` created with `npm run db:baseline`.
 - Storage adapter (`LocalStorageDriver`) with content-based binary magic bytes inspection (`magic-bytes.ts`) rejecting executables (PE, ELF, Mach-O), and path-traversal guard.
 - Legacy download paths secured inside `UPLOAD_DIR`, sending `Content-Disposition: attachment` for non-images.
