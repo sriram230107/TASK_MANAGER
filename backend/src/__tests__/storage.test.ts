@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { sniffFileContent } from '../services/storage/magic-bytes';
+import { sniffFileContent, isImageMime } from '../services/storage/magic-bytes';
 import { LocalStorageDriver } from '../services/storage/local.driver';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,6 +46,19 @@ describe('Storage Magic Bytes Sniffer', () => {
         expect(result.isExecutable).toBe(false);
     });
 
+    it('rejects HTML uploads by content', () => {
+        const buffer = Buffer.from('<!DOCTYPE html><html><body><script>alert(1)</script></body></html>');
+        const result = sniffFileContent(buffer, 'page.txt');
+        expect(result.isAllowed).toBe(false);
+        expect(result.extension).toBe('html');
+    });
+
+    it('rejects SVG uploads by content even when named .png', () => {
+        const buffer = Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script></script></svg>');
+        const result = sniffFileContent(buffer, 'image.png');
+        expect(result.isAllowed).toBe(false);
+    });
+
     it('detects and BLOCKS Windows PE executables (.exe / MZ header)', () => {
         const buffer = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]);
         const result = sniffFileContent(buffer, 'innocent-doc.pdf'); // client spoofing as PDF!
@@ -66,6 +79,17 @@ describe('Storage Magic Bytes Sniffer', () => {
         const result = sniffFileContent(buffer, 'binary.dat');
         expect(result.isExecutable).toBe(true);
         expect(result.isAllowed).toBe(false);
+    });
+});
+
+describe('Inline image disposition', () => {
+    it('serves only PNG, JPEG and WEBP inline; GIF is an attachment', () => {
+        expect(isImageMime('image/png')).toBe(true);
+        expect(isImageMime('image/jpeg')).toBe(true);
+        expect(isImageMime('image/webp')).toBe(true);
+        expect(isImageMime('image/gif')).toBe(false);
+        expect(isImageMime('application/pdf')).toBe(false);
+        expect(isImageMime('text/html')).toBe(false);
     });
 });
 

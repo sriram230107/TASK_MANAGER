@@ -28,10 +28,3 @@ export const buildStorageKey = (organizationId: string, originalName: string): s
     const uuid = randomUUID();
     return `org/${organizationId}/${year}/${uuid}-${safeName}`;
 };
-
-/**
- * Checks whether a MIME type represents an inline-displayable image.
- */
-export const isImageMime = (mimeType: string): boolean => {
-    return ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType);
-};

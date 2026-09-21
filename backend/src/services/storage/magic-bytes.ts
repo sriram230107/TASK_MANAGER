@@ -139,3 +139,10 @@ export const sniffFileContent = (buffer: Buffer, originalFilename = ''): SniffRe
         isExecutable: false
     };
 };
+
+/**
+ * PNG, JPEG and WEBP may display inline. Everything else, including GIF, is an attachment.
+ */
+export const isImageMime = (mimeType: string): boolean => {
+    return ['image/jpeg', 'image/png', 'image/webp'].includes(mimeType);
+};
